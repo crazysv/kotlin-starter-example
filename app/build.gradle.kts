@@ -74,14 +74,16 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.android)
     
-    // RunAnywhere SDK from Maven Central (includes native libraries)
-    implementation("io.github.sanchitmonga22:runanywhere-sdk-android:0.16.1")
+    // RunAnywhere SDK (local SNAPSHOT with streamVoiceSession API)
+    // Switch to 0.16.x for production, use 0.1.5-SNAPSHOT for local development
+    val sdkVersion = "0.1.5-SNAPSHOT"
+    implementation("io.github.sanchitmonga22:runanywhere-sdk-android:$sdkVersion")
 
     // LlamaCPP backend for LLM text generation (includes native libraries)
-    implementation("io.github.sanchitmonga22:runanywhere-llamacpp-android:0.16.1")
+    implementation("io.github.sanchitmonga22:runanywhere-llamacpp-android:$sdkVersion")
 
     // ONNX backend for STT/TTS/VAD (includes native libraries)
-    implementation("io.github.sanchitmonga22:runanywhere-onnx-android:0.16.1")
+    implementation("io.github.sanchitmonga22:runanywhere-onnx-android:$sdkVersion")
     
     // Testing
     testImplementation(libs.junit)
