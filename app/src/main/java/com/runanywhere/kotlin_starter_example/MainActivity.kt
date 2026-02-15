@@ -6,7 +6,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewmodel.compose.viewModel₹
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -68,7 +68,8 @@ fun RunAnywhereApp() {
                 onNavigateToChat = { navController.navigate("chat") },
                 onNavigateToSTT = { navController.navigate("stt") },
                 onNavigateToTTS = { navController.navigate("tts") },
-                onNavigateToVoicePipeline = { navController.navigate("voice_pipeline") }
+                onNavigateToVoicePipeline = { navController.navigate("voice_pipeline") },
+                onNavigateToToolCalling = { navController.navigate("tool_calling") }
             )
         }
         
@@ -95,6 +96,13 @@ fun RunAnywhereApp() {
         
         composable("voice_pipeline") {
             VoicePipelineScreen(
+                onNavigateBack = { navController.popBackStack() },
+                modelService = modelService
+            )
+        }
+        
+        composable("tool_calling") {
+            ToolCallingScreen(
                 onNavigateBack = { navController.popBackStack() },
                 modelService = modelService
             )

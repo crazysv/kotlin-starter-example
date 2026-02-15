@@ -27,6 +27,7 @@ fun HomeScreen(
     onNavigateToSTT: () -> Unit,
     onNavigateToTTS: () -> Unit,
     onNavigateToVoicePipeline: () -> Unit,
+    onNavigateToToolCalling: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Box(
@@ -104,6 +105,16 @@ fun HomeScreen(
                         icon = Icons.Rounded.AutoAwesome,
                         gradientColors = listOf(AccentGreen, Color(0xFF059669)),
                         onClick = onNavigateToVoicePipeline
+                    )
+                }
+                
+                item {
+                    FeatureCard(
+                        title = "Tools",
+                        subtitle = "Function Calling",
+                        icon = Icons.Rounded.Build,
+                        gradientColors = listOf(AccentOrange, Color(0xFFEA580C)),
+                        onClick = onNavigateToToolCalling
                     )
                 }
             }
