@@ -1,6 +1,9 @@
 package com.runanywhere.kotlin_starter_example.ui.screens
 
+import androidx.compose.animation.core.*
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -57,11 +60,13 @@ import com.runanywhere.kotlin_starter_example.ui.theme.SurfaceCard
 import com.runanywhere.kotlin_starter_example.ui.theme.TextMuted
 import com.runanywhere.kotlin_starter_example.ui.theme.TextPrimary
 import com.runanywhere.sdk.public.extensions.chat
+import com.runanywhere.sdk.public.extensions.generateStream
 import kotlinx.coroutines.launch
 
 data class ChatMessage(
     val text: String,
     val isUser: Boolean,
+    val isStreaming: Boolean = false,
     val timestamp: Long = System.currentTimeMillis()
 )
 
@@ -75,6 +80,7 @@ fun ChatScreen(
     var messages by remember { mutableStateOf(listOf<ChatMessage>()) }
     var inputText by remember { mutableStateOf("") }
     var isGenerating by remember { mutableStateOf(false) }
+    var currentStreamingResponse by remember { mutableStateOf("") }
     
     val scope = rememberCoroutineScope()
     val listState = rememberLazyListState()
@@ -145,7 +151,10 @@ fun ChatScreen(
                 }
                 
                 items(messages) { message ->
-                    ChatMessageBubble(message)
+                    ChatMessageBubble(
+                        message = message,
+                        streamingText = if (message.isStreaming) currentStreamingResponse else null
+                    )
                 }
             }
             
@@ -190,19 +199,35 @@ fun ChatScreen(
                                     
                                     scope.launch {
                                         isGenerating = true
+                                        currentStreamingResponse = ""
+                                        
+                                        // Add a placeholder message for streaming
+                                        messages = messages + ChatMessage("", isUser = false, isStreaming = true)
                                         listState.animateScrollToItem(messages.size)
                                         
                                         try {
-                                            val response = com.runanywhere.sdk.public.RunAnywhere.chat(userMessage)
-                                            messages = messages + ChatMessage(response, isUser = false)
-                                            listState.animateScrollToItem(messages.size)
+                                            // Stream tokens as they're generated
+                                            com.runanywhere.sdk.public.RunAnywhere.generateStream(userMessage)
+                                                .collect { token ->
+                                                    currentStreamingResponse += token
+                                                    // Auto-scroll to bottom while streaming
+                                                    listState.animateScrollToItem(messages.size - 1)
+                                                }
+                                            
+                                            // Replace streaming message with final message
+                                            messages = messages.dropLast(1) + ChatMessage(
+                                                currentStreamingResponse,
+                                                isUser = false,
+                                                isStreaming = false
+                                            )
                                         } catch (e: Exception) {
-                                            messages = messages + ChatMessage(
+                                            messages = messages.dropLast(1) + ChatMessage(
                                                 "Error: ${e.message}",
                                                 isUser = false
                                             )
                                         } finally {
                                             isGenerating = false
+                                            currentStreamingResponse = ""
                                         }
                                     }
                                 }
@@ -255,7 +280,10 @@ private fun EmptyStateMessage() {
 }
 
 @Composable
-private fun ChatMessageBubble(message: ChatMessage) {
+private fun ChatMessageBubble(
+    message: ChatMessage,
+    streamingText: String? = null
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (message.isUser) Arrangement.End else Arrangement.Start
@@ -284,12 +312,24 @@ private fun ChatMessageBubble(message: ChatMessage) {
                 containerColor = if (message.isUser) AccentCyan else SurfaceCard
             )
         ) {
-            Text(
-                text = message.text,
+            Row(
                 modifier = Modifier.padding(12.dp),
-                style = MaterialTheme.typography.bodyMedium,
-                color = if (message.isUser) Color.White else TextPrimary
-            )
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Display streaming text if available, otherwise show message text
+                val displayText = streamingText ?: message.text
+                Text(
+                    text = displayText,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (message.isUser) Color.White else TextPrimary
+                )
+                
+                // Show cursor animation when streaming
+                if (message.isStreaming && streamingText != null) {
+                    Spacer(modifier = Modifier.width(2.dp))
+                    StreamingCursor()
+                }
+            }
         }
         
         if (message.isUser) {
@@ -304,4 +344,24 @@ private fun ChatMessageBubble(message: ChatMessage) {
             )
         }
     }
+}
+
+@Composable
+private fun StreamingCursor() {
+    val infiniteTransition = rememberInfiniteTransition(label = "cursor")
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(800, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "alpha"
+    )
+    
+    Box(
+        modifier = Modifier
+            .size(width = 2.dp, height = 16.dp)
+            .background(TextPrimary.copy(alpha = alpha))
+    )
 }
