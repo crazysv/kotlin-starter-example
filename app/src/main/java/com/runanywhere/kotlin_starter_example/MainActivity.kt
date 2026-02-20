@@ -20,6 +20,8 @@ import com.runanywhere.sdk.public.RunAnywhere
 import com.runanywhere.sdk.public.SDKEnvironment
 import com.runanywhere.sdk.storage.AndroidPlatformContext
 import java.io.File
+import com.runanywhere.kotlin_starter_example.kodent.ui.KodentHomeScreen
+
 
 class MainActivity : ComponentActivity() {
 
@@ -65,8 +67,21 @@ fun RunAnywhereApp() {
 
     NavHost(
         navController = navController,
-        startDestination = "kodent_analyzer"   // 🔥 Kodent is now default
+        startDestination = "kodent_home"   // 🔥 Kodent is now default
     ) {
+
+        // 🔹 Kodent Home
+        composable("kodent_home") {
+            KodentHomeScreen(
+                onAnalyzeClick = {
+                    navController.navigate("kodent_analyzer")
+                },
+                isModelLoaded = modelService.isLLMLoaded,
+                onLoadModelClick = {
+                    modelService.downloadAndLoadLLM()
+                }
+            )
+        }
 
         // 🔥 Kodent Analyzer Screen
         composable("kodent_analyzer") {
