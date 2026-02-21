@@ -41,6 +41,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.delay
+import com.runanywhere.kotlin_starter_example.services.ModelType
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -71,7 +72,20 @@ fun KodentAnalyzerScreen(
         containerColor = PrimaryDark,
         topBar = {
             TopAppBar(
-                title = { Text("Kodent") },
+                title = {
+                    Column {
+                        Text("Kodent")
+                        Text(
+                            text = when (modelService.activeModel) {
+                                ModelType.QUICK -> "🚀 Quick Mode"
+                                ModelType.DEEP -> "🧠 Deep Mode"
+                                else -> "No model loaded"
+                            },
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextMuted
+                        )
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back")
@@ -229,7 +243,7 @@ private fun AnalyzerContent(
         Button(
             onClick = {
                 keyboardController?.hide()
-                kodentViewModel.analyze()
+                kodentViewModel.analyze(modelService.activeModel)
             },
             modifier = Modifier.fillMaxWidth(),
             enabled = !kodentViewModel.isAnalyzing
@@ -380,7 +394,7 @@ private fun AnalyzerContent(
 
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(
-                                onClick = { kodentViewModel.retry() },
+                                onClick = { kodentViewModel.analyze(modelService.activeModel) },
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = AccentPink
                                 )

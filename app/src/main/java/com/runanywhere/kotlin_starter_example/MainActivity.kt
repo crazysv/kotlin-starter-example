@@ -76,10 +76,7 @@ fun RunAnywhereApp() {
                 onAnalyzeClick = {
                     navController.navigate("kodent_analyzer")
                 },
-                isModelLoaded = modelService.isLLMLoaded,
-                onLoadModelClick = {
-                    modelService.downloadAndLoadLLM()
-                }
+                modelService = modelService
             )
         }
 

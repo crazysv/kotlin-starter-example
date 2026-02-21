@@ -24,70 +24,90 @@ import com.runanywhere.sdk.public.extensions.availableModels
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 
-/**
- * Service for managing AI models - handles registration, downloading, and loading
- * Similar to the Flutter ModelService for consistent behavior across platforms
- */
+enum class ModelType {
+    QUICK,  // SmolLM2-360M
+    DEEP    // Qwen2.5-Coder-1.5B
+}
+
 class ModelService : ViewModel() {
-    
-    // Model state
+
+    // Active model tracking
+    var activeModel by mutableStateOf<ModelType?>(null)
+        private set
+
+    // LLM state
     var isLLMDownloading by mutableStateOf(false)
         private set
-    var isSTTDownloading by mutableStateOf(false)
+    var isLLMLoading by mutableStateOf(false)
         private set
-    var isTTSDownloading by mutableStateOf(false)
+    var isLLMLoaded by mutableStateOf(false)
         private set
-    
     var llmDownloadProgress by mutableStateOf(0f)
         private set
-    var sttDownloadProgress by mutableStateOf(0f)
+
+    // Track which model is being downloaded/loaded
+    var modelBeingPrepared by mutableStateOf<ModelType?>(null)
         private set
-    var ttsDownloadProgress by mutableStateOf(0f)
-        private set
-    
-    var isLLMLoading by mutableStateOf(false)
+
+    // STT state
+    var isSTTDownloading by mutableStateOf(false)
         private set
     var isSTTLoading by mutableStateOf(false)
         private set
-    var isTTSLoading by mutableStateOf(false)
-        private set
-    
-    var isLLMLoaded by mutableStateOf(false)
-        private set
     var isSTTLoaded by mutableStateOf(false)
+        private set
+    var sttDownloadProgress by mutableStateOf(0f)
+        private set
+
+    // TTS state
+    var isTTSDownloading by mutableStateOf(false)
+        private set
+    var isTTSLoading by mutableStateOf(false)
         private set
     var isTTSLoaded by mutableStateOf(false)
         private set
-    
+    var ttsDownloadProgress by mutableStateOf(0f)
+        private set
+
     var isVoiceAgentReady by mutableStateOf(false)
         private set
-    
+
     var errorMessage by mutableStateOf<String?>(null)
         private set
-    
+
     companion object {
-        // Model IDs - using officially supported models from RunanywhereAI
-        const val LLM_MODEL_ID = "smollm2-360m-instruct-q8_0"
+        // Quick Model
+        const val QUICK_MODEL_ID = "smollm2-360m-instruct-q8_0"
+
+        // Deep Model
+        const val DEEP_MODEL_ID = "qwen2.5-coder-1.5b-instruct-q4_k_m"
+
+        // STT / TTS (unchanged)
         const val STT_MODEL_ID = "sherpa-onnx-whisper-tiny.en"
         const val TTS_MODEL_ID = "vits-piper-en_US-lessac-medium"
-        
-        /**
-         * Register default models with the SDK
-         * Using officially supported models from RunanywhereAI/sherpa-onnx for compatibility
-         */
+
         fun registerDefaultModels() {
-            // LLM Model - SmolLM2 360M (small, fast, good for demos)
+            // Quick Model - SmolLM2 360M
             RunAnywhere.registerModel(
-                id = LLM_MODEL_ID,
+                id = QUICK_MODEL_ID,
                 name = "SmolLM2 360M Instruct Q8_0",
                 url = "https://huggingface.co/HuggingFaceTB/SmolLM2-360M-Instruct-GGUF/resolve/main/smollm2-360m-instruct-q8_0.gguf",
                 framework = InferenceFramework.LLAMA_CPP,
                 modality = ModelCategory.LANGUAGE,
-                memoryRequirement = 400_000_000 // ~400MB
+                memoryRequirement = 400_000_000
             )
-            
-            // STT Model - Whisper Tiny English (fast transcription)
-            // Using tar.gz format from RunanywhereAI for fast native extraction
+
+            // Deep Model - Qwen2.5 Coder 1.5B
+            RunAnywhere.registerModel(
+                id = DEEP_MODEL_ID,
+                name = "Qwen2.5 Coder 1.5B Instruct Q4_K_M",
+                url = "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
+                framework = InferenceFramework.LLAMA_CPP,
+                modality = ModelCategory.LANGUAGE,
+                memoryRequirement = 1_200_000_000
+            )
+
+            // STT Model
             RunAnywhere.registerModel(
                 id = STT_MODEL_ID,
                 name = "Sherpa Whisper Tiny (ONNX)",
@@ -95,9 +115,8 @@ class ModelService : ViewModel() {
                 framework = InferenceFramework.ONNX,
                 modality = ModelCategory.SPEECH_RECOGNITION
             )
-            
-            // TTS Model - Piper TTS (US English - Medium quality)
-            // Using officially supported Piper model for reliable TTS
+
+            // TTS Model
             RunAnywhere.registerModel(
                 id = TTS_MODEL_ID,
                 name = "Piper TTS (US English - Medium)",
@@ -107,88 +126,119 @@ class ModelService : ViewModel() {
             )
         }
     }
-    
+
     init {
         viewModelScope.launch {
             refreshModelState()
         }
     }
-    
-    /**
-     * Refresh model loaded states from SDK
-     */
+
     private suspend fun refreshModelState() {
         isLLMLoaded = RunAnywhere.isLLMModelLoaded()
         isSTTLoaded = RunAnywhere.isSTTModelLoaded()
         isTTSLoaded = RunAnywhere.isTTSVoiceLoaded()
         isVoiceAgentReady = RunAnywhere.isVoiceAgentReady()
     }
-    
-    /**
-     * Check if a model is downloaded
-     */
+
     private suspend fun isModelDownloaded(modelId: String): Boolean {
         val models = RunAnywhere.availableModels()
         val model = models.find { it.id == modelId }
         return model?.localPath != null
     }
-    
+
     /**
-     * Download and load LLM model
+     * Get the model ID for a given ModelType
      */
-    fun downloadAndLoadLLM() {
+    fun getModelId(type: ModelType): String {
+        return when (type) {
+            ModelType.QUICK -> QUICK_MODEL_ID
+            ModelType.DEEP -> DEEP_MODEL_ID
+        }
+    }
+
+    /**
+     * Check if a specific model type is downloaded
+     */
+    suspend fun isModelTypeDownloaded(type: ModelType): Boolean {
+        return isModelDownloaded(getModelId(type))
+    }
+
+    /**
+     * Download and load a specific model type
+     * Unloads current model first if different one is loaded
+     */
+    fun downloadAndLoadModel(type: ModelType) {
         if (isLLMDownloading || isLLMLoading) return
-        
+
         viewModelScope.launch {
             try {
                 errorMessage = null
-                
-                // Check if already downloaded
-                if (!isModelDownloaded(LLM_MODEL_ID)) {
+                modelBeingPrepared = type
+                val modelId = getModelId(type)
+
+                // Step 1: Download if needed
+                if (!isModelDownloaded(modelId)) {
                     isLLMDownloading = true
                     llmDownloadProgress = 0f
-                    
-                    RunAnywhere.downloadModel(LLM_MODEL_ID)
+
+                    RunAnywhere.downloadModel(modelId)
                         .catch { e ->
-                            errorMessage = "LLM download failed: ${e.message}"
+                            errorMessage = "Download failed: ${e.message}"
                         }
                         .collect { progress ->
                             llmDownloadProgress = progress.progress
                         }
-                    
+
                     isLLMDownloading = false
                 }
-                
-                // Load the model
+
+                // Step 2: Unload current model if one is loaded
+                if (isLLMLoaded) {
+                    RunAnywhere.unloadLLMModel()
+                    isLLMLoaded = false
+                    activeModel = null
+                }
+
+                // Step 3: Load new model
                 isLLMLoading = true
-                RunAnywhere.loadLLMModel(LLM_MODEL_ID)
+                RunAnywhere.loadLLMModel(modelId)
                 isLLMLoaded = true
+                activeModel = type
                 isLLMLoading = false
-                
+
+                modelBeingPrepared = null
                 refreshModelState()
+
             } catch (e: Exception) {
-                errorMessage = "LLM load failed: ${e.message}"
+                errorMessage = "Model load failed: ${e.message}"
                 isLLMDownloading = false
                 isLLMLoading = false
+                modelBeingPrepared = null
             }
         }
     }
-    
+
+    /**
+     * Legacy function — loads Quick model by default
+     */
+    fun downloadAndLoadLLM() {
+        downloadAndLoadModel(ModelType.QUICK)
+    }
+
     /**
      * Download and load STT model
      */
     fun downloadAndLoadSTT() {
         if (isSTTDownloading || isSTTLoading) return
-        
+
         viewModelScope.launch {
             try {
                 errorMessage = null
-                
-                // Check if already downloaded
+
                 if (!isModelDownloaded(STT_MODEL_ID)) {
                     isSTTDownloading = true
                     sttDownloadProgress = 0f
-                    
+
                     RunAnywhere.downloadModel(STT_MODEL_ID)
                         .catch { e ->
                             errorMessage = "STT download failed: ${e.message}"
@@ -196,16 +246,15 @@ class ModelService : ViewModel() {
                         .collect { progress ->
                             sttDownloadProgress = progress.progress
                         }
-                    
+
                     isSTTDownloading = false
                 }
-                
-                // Load the model
+
                 isSTTLoading = true
                 RunAnywhere.loadSTTModel(STT_MODEL_ID)
                 isSTTLoaded = true
                 isSTTLoading = false
-                
+
                 refreshModelState()
             } catch (e: Exception) {
                 errorMessage = "STT load failed: ${e.message}"
@@ -214,22 +263,21 @@ class ModelService : ViewModel() {
             }
         }
     }
-    
+
     /**
      * Download and load TTS model
      */
     fun downloadAndLoadTTS() {
         if (isTTSDownloading || isTTSLoading) return
-        
+
         viewModelScope.launch {
             try {
                 errorMessage = null
-                
-                // Check if already downloaded
+
                 if (!isModelDownloaded(TTS_MODEL_ID)) {
                     isTTSDownloading = true
                     ttsDownloadProgress = 0f
-                    
+
                     RunAnywhere.downloadModel(TTS_MODEL_ID)
                         .catch { e ->
                             errorMessage = "TTS download failed: ${e.message}"
@@ -237,16 +285,15 @@ class ModelService : ViewModel() {
                         .collect { progress ->
                             ttsDownloadProgress = progress.progress
                         }
-                    
+
                     isTTSDownloading = false
                 }
-                
-                // Load the model
+
                 isTTSLoading = true
                 RunAnywhere.loadTTSVoice(TTS_MODEL_ID)
                 isTTSLoaded = true
                 isTTSLoading = false
-                
+
                 refreshModelState()
             } catch (e: Exception) {
                 errorMessage = "TTS load failed: ${e.message}"
@@ -255,38 +302,29 @@ class ModelService : ViewModel() {
             }
         }
     }
-    
-    /**
-     * Download and load all models for voice agent
-     */
+
     fun downloadAndLoadAllModels() {
         viewModelScope.launch {
-            // Download sequentially for better progress tracking
             if (!isLLMLoaded) downloadAndLoadLLM()
             if (!isSTTLoaded) downloadAndLoadSTT()
             if (!isTTSLoaded) downloadAndLoadTTS()
         }
     }
-    
-    /**
-     * Unload all models
-     */
+
     fun unloadAllModels() {
         viewModelScope.launch {
             try {
                 RunAnywhere.unloadLLMModel()
                 RunAnywhere.unloadSTTModel()
                 RunAnywhere.unloadTTSVoice()
+                activeModel = null
                 refreshModelState()
             } catch (e: Exception) {
                 errorMessage = "Failed to unload models: ${e.message}"
             }
         }
     }
-    
-    /**
-     * Clear error message
-     */
+
     fun clearError() {
         errorMessage = null
     }
