@@ -26,6 +26,14 @@ class KodentViewModel : ViewModel() {
     var showHistory by mutableStateOf(false)
         private set
 
+    var tokenCount by mutableStateOf(0)
+        private set
+    var analysisTimeMs by mutableStateOf(0L)
+        private set
+
+    var errorMessage by mutableStateOf<String?>(null)
+        private set
+
     private var analysisJob: Job? = null
 
     fun updateCode(newCode: String) {
@@ -53,8 +61,23 @@ class KodentViewModel : ViewModel() {
 
     fun cancelAnalysis() {
         analysisJob?.cancel()
-        isAnalyzing = false
-        analysisResult += "\n\n⚠️ Analysis cancelled."
+    }
+
+    fun clearInput() {
+        codeInput = ""
+    }
+
+    fun clearResult() {
+        analysisResult = ""
+    }
+
+    fun clearError() {
+        errorMessage = null
+    }
+
+    fun retry() {
+        errorMessage = null
+        analyze()
     }
 
     fun analyze() {
@@ -75,6 +98,9 @@ class KodentViewModel : ViewModel() {
             try {
                 isAnalyzing = true
                 analysisResult = ""
+                errorMessage = null
+                tokenCount = 0
+                analysisTimeMs = 0L
 
                 val userPrompt = when (selectedMode) {
                     "Explain" -> "Analyze this Kotlin code:\n```kotlin\n$codeInput\n```\nWhat does this code do?"
@@ -85,8 +111,8 @@ class KodentViewModel : ViewModel() {
                 }
 
                 val options = LLMGenerationOptions(
-                    temperature = 0.0f,
-                    topP = 1.0f,
+                    temperature = 0.1f,
+                    topP = 0.9f,
                     maxTokens = when (selectedMode) {
                         "Explain" -> 200
                         "Debug" -> 250
@@ -135,21 +161,54 @@ class KodentViewModel : ViewModel() {
                     }
                 )
 
+                val buffer = StringBuilder()
+                var localTokenCount = 0
+                val startTime = System.currentTimeMillis()
+
+                tokenCount = 0
+                analysisTimeMs = 0L
+
                 RunAnywhere.generateStream(userPrompt, options)
                     .collect { token ->
-                        analysisResult += token
+                        buffer.append(token)
+                        localTokenCount++
+
+                        if (localTokenCount % 3 == 0 || token.contains("\n")) {
+                            analysisResult = buffer.toString()
+                            tokenCount = localTokenCount
+                        }
                     }
 
+                // Final flush
+                analysisResult = buffer.toString()
+                tokenCount = localTokenCount
+                analysisTimeMs = System.currentTimeMillis() - startTime
+
                 // Save to history after successful analysis
-                history = history + AnalysisRecord(
+                history = (history + AnalysisRecord(
                     code = codeInput,
                     mode = selectedMode,
                     result = analysisResult
-                )
+                )).takeLast(20)
 
             } catch (e: Exception) {
-                if (e is kotlinx.coroutines.CancellationException) throw e
-                analysisResult = "Error: ${e.message}"
+                if (e is kotlinx.coroutines.CancellationException) {
+                    analysisResult += "\n\n⚠️ Analysis cancelled."
+                    throw e
+                }
+                analysisResult = ""
+                errorMessage = when {
+                    e.message?.contains("model", ignoreCase = true) == true ->
+                        "Model error. Try reloading the model."
+                    e.message?.contains("memory", ignoreCase = true) == true ->
+                        "Not enough memory. Try shorter code."
+                    e.message?.contains("timeout", ignoreCase = true) == true ->
+                        "Analysis timed out. Try shorter code."
+                    e.message?.contains("load", ignoreCase = true) == true ->
+                        "Model not loaded. Go back and load the model."
+                    else ->
+                        "Analysis failed: ${e.message ?: "Unknown error"}"
+                }
             } finally {
                 isAnalyzing = false
             }

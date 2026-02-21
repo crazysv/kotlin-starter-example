@@ -11,11 +11,17 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.DeleteSweep
+import androidx.compose.material.icons.rounded.Close
+import androidx.compose.material.icons.rounded.ContentCopy
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -34,6 +40,7 @@ import com.runanywhere.kotlin_starter_example.ui.theme.TextMuted
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.delay
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,7 +61,10 @@ fun KodentAnalyzerScreen(
     }
 
     LaunchedEffect(kodentViewModel.analysisResult) {
-        scrollState.scrollTo(scrollState.maxValue)
+        if (kodentViewModel.isAnalyzing) {
+            delay(50)
+            scrollState.animateScrollTo(scrollState.maxValue)
+        }
     }
 
     Scaffold(
@@ -79,7 +89,6 @@ fun KodentAnalyzerScreen(
     ) { padding ->
 
         if (kodentViewModel.showHistory) {
-            // History Screen
             HistoryContent(
                 history = kodentViewModel.history,
                 onItemClick = { kodentViewModel.loadFromHistory(it) },
@@ -90,7 +99,6 @@ fun KodentAnalyzerScreen(
                     .padding(16.dp)
             )
         } else {
-            // Analyzer Screen
             AnalyzerContent(
                 kodentViewModel = kodentViewModel,
                 modelService = modelService,
@@ -111,6 +119,9 @@ private fun AnalyzerContent(
     scrollState: androidx.compose.foundation.ScrollState,
     modifier: Modifier = Modifier
 ) {
+    val clipboardManager = LocalClipboardManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+
     Column(modifier = modifier) {
 
         if (!modelService.isLLMLoaded) {
@@ -174,21 +185,41 @@ private fun AnalyzerContent(
             ),
             keyboardOptions = KeyboardOptions.Default.copy(
                 imeAction = ImeAction.Done
-            )
+            ),
+            trailingIcon = {
+                if (kodentViewModel.codeInput.isNotBlank()) {
+                    IconButton(onClick = { kodentViewModel.clearInput() }) {
+                        Icon(
+                            Icons.Rounded.Close,
+                            contentDescription = "Clear code",
+                            tint = TextMuted
+                        )
+                    }
+                }
+            }
         )
 
         // Kotlin detection
         if (kodentViewModel.codeInput.isNotBlank()) {
             Spacer(modifier = Modifier.height(4.dp))
+
+            val charCount = kodentViewModel.codeInput.trim().length
+            val lineCount = kodentViewModel.codeInput.lines().size
+
             Text(
-                text = if (kodentViewModel.codeInput.trim().length < 10)
-                    "⚠️ Too short"
-                else if (looksLikeKotlin(kodentViewModel.codeInput))
-                    "✅ Looks like Kotlin"
-                else
-                    "⚠️ May not be valid Kotlin",
+                text = when {
+                    charCount < 10 -> "⚠️ Too short • $charCount chars"
+                    !looksLikeKotlin(kodentViewModel.codeInput) -> "⚠️ May not be valid Kotlin • $lineCount lines • $charCount chars"
+                    lineCount > 40 -> "✅ Kotlin • ⚠️ Long code may reduce accuracy • $lineCount lines • $charCount chars"
+                    else -> "✅ Looks like Kotlin • $lineCount lines • $charCount chars"
+                },
                 style = MaterialTheme.typography.labelSmall,
-                color = TextMuted
+                color = when {
+                    charCount < 10 -> AccentOrange
+                    !looksLikeKotlin(kodentViewModel.codeInput) -> AccentOrange
+                    lineCount > 40 -> AccentOrange
+                    else -> TextMuted
+                }
             )
         }
 
@@ -196,9 +227,14 @@ private fun AnalyzerContent(
 
         // Analyze Button
         Button(
-            onClick = { kodentViewModel.analyze() },
+            onClick = {
+                keyboardController?.hide()
+                kodentViewModel.analyze()
+            },
             modifier = Modifier.fillMaxWidth(),
             enabled = !kodentViewModel.isAnalyzing
+                    && kodentViewModel.codeInput.trim().length >= 10
+                    && looksLikeKotlin(kodentViewModel.codeInput)
         ) {
             if (kodentViewModel.isAnalyzing) {
                 CircularProgressIndicator(
@@ -257,6 +293,30 @@ private fun AnalyzerContent(
                         color = TextMuted
                     )
                 }
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                if (!kodentViewModel.isAnalyzing) {
+                    IconButton(onClick = {
+                        clipboardManager.setText(AnnotatedString(kodentViewModel.analysisResult))
+                    }) {
+                        Icon(
+                            Icons.Rounded.ContentCopy,
+                            contentDescription = "Copy result",
+                            modifier = Modifier.size(18.dp),
+                            tint = AccentCyan
+                        )
+                    }
+
+                    IconButton(onClick = { kodentViewModel.clearResult() }) {
+                        Icon(
+                            Icons.Rounded.Close,
+                            contentDescription = "Clear result",
+                            modifier = Modifier.size(18.dp),
+                            tint = TextMuted
+                        )
+                    }
+                }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
@@ -272,13 +332,77 @@ private fun AnalyzerContent(
             }
         }
 
+        // Stats row
+        if (!kodentViewModel.isAnalyzing && kodentViewModel.tokenCount > 0) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "${kodentViewModel.tokenCount} tokens • ${kodentViewModel.analysisTimeMs / 1000.0}s",
+                style = MaterialTheme.typography.labelSmall,
+                color = TextMuted
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
         // Result
         Column(
             modifier = Modifier
                 .weight(1f)
                 .verticalScroll(scrollState)
         ) {
-            if (kodentViewModel.analysisResult.isNotBlank()) {
+            if (kodentViewModel.errorMessage != null) {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = AccentPink.copy(alpha = 0.1f)
+                    )
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp)
+                    ) {
+                        Text(
+                            text = "❌ Error",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = AccentPink
+                        )
+
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Text(
+                            text = kodentViewModel.errorMessage ?: "",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = TextMuted
+                        )
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = { kodentViewModel.retry() },
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = AccentPink
+                                )
+                            ) {
+                                Icon(
+                                    Icons.Rounded.Refresh,
+                                    contentDescription = "Retry",
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Retry")
+                            }
+
+                            OutlinedButton(
+                                onClick = { kodentViewModel.clearError() }
+                            ) {
+                                Text("Dismiss")
+                            }
+                        }
+                    }
+                }
+            } else if (kodentViewModel.analysisResult.isNotBlank()) {
                 SelectionContainer {
                     Text(
                         text = if (kodentViewModel.isAnalyzing)
