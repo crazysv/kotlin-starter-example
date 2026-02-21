@@ -21,8 +21,11 @@ import com.runanywhere.sdk.public.extensions.isSTTModelLoaded
 import com.runanywhere.sdk.public.extensions.isTTSVoiceLoaded
 import com.runanywhere.sdk.public.extensions.isVoiceAgentReady
 import com.runanywhere.sdk.public.extensions.availableModels
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 enum class ModelType {
     QUICK,  // SmolLM2-360M
@@ -146,9 +149,6 @@ class ModelService : ViewModel() {
         return model?.localPath != null
     }
 
-    /**
-     * Get the model ID for a given ModelType
-     */
     fun getModelId(type: ModelType): String {
         return when (type) {
             ModelType.QUICK -> QUICK_MODEL_ID
@@ -156,19 +156,20 @@ class ModelService : ViewModel() {
         }
     }
 
-    /**
-     * Check if a specific model type is downloaded
-     */
     suspend fun isModelTypeDownloaded(type: ModelType): Boolean {
         return isModelDownloaded(getModelId(type))
     }
 
-    /**
-     * Download and load a specific model type
-     * Unloads current model first if different one is loaded
-     */
     fun downloadAndLoadModel(type: ModelType) {
-        if (isLLMDownloading || isLLMLoading) return
+        // If already loading the same type, skip
+        if ((isLLMDownloading || isLLMLoading) && modelBeingPrepared == type) return
+
+        // If stuck from previous failed attempt, reset
+        if (isLLMDownloading || isLLMLoading) {
+            isLLMDownloading = false
+            isLLMLoading = false
+            modelBeingPrepared = null
+        }
 
         viewModelScope.launch {
             try {
@@ -192,25 +193,33 @@ class ModelService : ViewModel() {
                     isLLMDownloading = false
                 }
 
-                // Step 2: Unload current model if one is loaded
+                // Step 2: Unload current model if one is loaded (OFF MAIN THREAD)
                 if (isLLMLoaded) {
-                    RunAnywhere.unloadLLMModel()
+                    withContext(Dispatchers.IO) {
+                        RunAnywhere.unloadLLMModel()
+                    }
                     isLLMLoaded = false
                     activeModel = null
                 }
 
-                // Step 3: Load new model
+                // Let memory settle after unload
+                delay(200)
+
+                // Step 3: Load new model (OFF MAIN THREAD)
                 isLLMLoading = true
-                RunAnywhere.loadLLMModel(modelId)
+                withContext(Dispatchers.IO) {
+                    RunAnywhere.loadLLMModel(modelId)
+                }
                 isLLMLoaded = true
                 activeModel = type
-                isLLMLoading = false
 
-                modelBeingPrepared = null
                 refreshModelState()
 
             } catch (e: Exception) {
                 errorMessage = "Model load failed: ${e.message}"
+                isLLMLoaded = false
+                activeModel = null
+            } finally {
                 isLLMDownloading = false
                 isLLMLoading = false
                 modelBeingPrepared = null
@@ -218,16 +227,10 @@ class ModelService : ViewModel() {
         }
     }
 
-    /**
-     * Legacy function — loads Quick model by default
-     */
     fun downloadAndLoadLLM() {
         downloadAndLoadModel(ModelType.QUICK)
     }
 
-    /**
-     * Download and load STT model
-     */
     fun downloadAndLoadSTT() {
         if (isSTTDownloading || isSTTLoading) return
 
@@ -264,9 +267,6 @@ class ModelService : ViewModel() {
         }
     }
 
-    /**
-     * Download and load TTS model
-     */
     fun downloadAndLoadTTS() {
         if (isTTSDownloading || isTTSLoading) return
 
@@ -314,9 +314,11 @@ class ModelService : ViewModel() {
     fun unloadAllModels() {
         viewModelScope.launch {
             try {
-                RunAnywhere.unloadLLMModel()
-                RunAnywhere.unloadSTTModel()
-                RunAnywhere.unloadTTSVoice()
+                withContext(Dispatchers.IO) {
+                    RunAnywhere.unloadLLMModel()
+                    RunAnywhere.unloadSTTModel()
+                    RunAnywhere.unloadTTSVoice()
+                }
                 activeModel = null
                 refreshModelState()
             } catch (e: Exception) {

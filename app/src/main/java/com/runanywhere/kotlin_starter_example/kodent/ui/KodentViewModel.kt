@@ -9,8 +9,11 @@ import com.runanywhere.kotlin_starter_example.services.ModelType
 import com.runanywhere.sdk.public.RunAnywhere
 import com.runanywhere.sdk.public.extensions.LLM.LLMGenerationOptions
 import com.runanywhere.sdk.public.extensions.generateStream
+import com.runanywhere.sdk.public.extensions.transcribe
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class KodentViewModel : ViewModel() {
 
@@ -32,8 +35,15 @@ class KodentViewModel : ViewModel() {
         private set
     var errorMessage by mutableStateOf<String?>(null)
         private set
+    var isListening by mutableStateOf(false)
+        private set
+    var isTranscribing by mutableStateOf(false)
+        private set
+    var speechText by mutableStateOf("")
+        private set
 
     private var analysisJob: Job? = null
+    private val audioRecorder = AudioRecorder()
 
     fun updateCode(newCode: String) {
         codeInput = newCode
@@ -79,6 +89,88 @@ class KodentViewModel : ViewModel() {
         analysisJob?.cancel()
     }
 
+    fun startListening() {
+        if (isListening || isTranscribing) return
+
+        viewModelScope.launch {
+            try {
+                val started = withContext(Dispatchers.IO) {
+                    audioRecorder.startRecording()
+                }
+                if (started) {
+                    isListening = true
+                    speechText = ""
+                    errorMessage = null
+                } else {
+                    errorMessage = "Failed to start recording"
+                }
+            } catch (e: Exception) {
+                errorMessage = "Recording failed: ${e.message}"
+            }
+        }
+    }
+
+    fun stopListeningAndProcess(activeModel: ModelType? = null) {
+        if (!isListening) return
+
+        isListening = false
+        isTranscribing = true
+
+        viewModelScope.launch {
+            try {
+                val audioData = withContext(Dispatchers.IO) {
+                    audioRecorder.stopRecording()
+                }
+
+                if (audioData.isEmpty()) {
+                    errorMessage = "No audio recorded"
+                    isTranscribing = false
+                    return@launch
+                }
+
+                val result = withContext(Dispatchers.IO) {
+                    RunAnywhere.transcribe(audioData)
+                }
+
+                isTranscribing = false
+
+                if (result.isNotBlank()) {
+                    speechText = result
+                    detectModeFromSpeech(result, activeModel)
+                } else {
+                    errorMessage = "Didn't catch that. Try again."
+                }
+
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                isTranscribing = false
+                errorMessage = "Transcription failed: ${e.message}"
+            }
+        }
+    }
+
+    private fun detectModeFromSpeech(speech: String, activeModel: ModelType? = null) {
+        val lower = speech.lowercase().trim()
+
+        val detectedMode = when {
+            lower.contains("explain") || lower.contains("what does") || lower.contains("what is") -> "Explain"
+            lower.contains("debug") || lower.contains("bug") || lower.contains("error") || lower.contains("fix") -> "Debug"
+            lower.contains("optimize") || lower.contains("improve") || lower.contains("better") || lower.contains("faster") -> "Optimize"
+            lower.contains("complex") || lower.contains("big o") || lower.contains("time") && lower.contains("space") -> "Complexity"
+            lower.contains("analyze") || lower.contains("check") || lower.contains("review") -> "Explain"
+            else -> null
+        }
+
+        if (detectedMode != null) {
+            selectedMode = detectedMode
+            speechText = "🎤 \"$speech\" → $detectedMode mode"
+            analyze(activeModel)
+        } else {
+            speechText = "🎤 \"$speech\""
+            errorMessage = "Say: explain, debug, optimize, or complexity"
+        }
+    }
+
     fun analyze(activeModel: ModelType? = null) {
         if (codeInput.isBlank() || isAnalyzing) return
 
@@ -109,6 +201,7 @@ class KodentViewModel : ViewModel() {
                 val buffer = StringBuilder()
                 var localTokenCount = 0
                 val startTime = System.currentTimeMillis()
+                val maxTimeMs = if (isDeep) 120_000L else 60_000L
 
                 RunAnywhere.generateStream(userPrompt, options)
                     .collect { token ->
@@ -119,12 +212,28 @@ class KodentViewModel : ViewModel() {
                             analysisResult = buffer.toString()
                             tokenCount = localTokenCount
                         }
+
+                        // Safety timeout
+                        if (System.currentTimeMillis() - startTime > maxTimeMs) {
+                            analysisResult = buffer.toString()
+                            return@collect
+                        }
                     }
 
                 // Final flush
                 analysisResult = buffer.toString()
                 tokenCount = localTokenCount
                 analysisTimeMs = System.currentTimeMillis() - startTime
+
+                // Handle empty response
+                if (analysisResult.isBlank()) {
+                    analysisResult = when (selectedMode) {
+                        "Debug" -> "No bugs found. The code looks correct."
+                        "Optimize" -> "Code looks good. No major improvements needed."
+                        "Complexity" -> "Unable to determine complexity for this code."
+                        else -> "No output generated. Try rephrasing or shorter code."
+                    }
+                }
 
                 // Save to history
                 history = (history + AnalysisRecord(
@@ -159,7 +268,6 @@ class KodentViewModel : ViewModel() {
 
     private fun buildUserPrompt(isDeep: Boolean): String {
         return if (isDeep) {
-            // Deep model gets more detailed prompts
             when (selectedMode) {
                 "Explain" -> """
                     Analyze this Kotlin code and explain what it does step by step:
@@ -198,7 +306,6 @@ class KodentViewModel : ViewModel() {
                 else -> codeInput
             }
         } else {
-            // Quick model gets short focused prompts
             when (selectedMode) {
                 "Explain" -> "Analyze this Kotlin code:\n```kotlin\n$codeInput\n```\nWhat does this code do?"
                 "Debug" -> "Find bugs in this Kotlin code:\n```kotlin\n$codeInput\n```"
@@ -211,20 +318,26 @@ class KodentViewModel : ViewModel() {
 
     private fun buildOptions(isDeep: Boolean): LLMGenerationOptions {
         return if (isDeep) {
-            // Deep model can handle more tokens and detailed prompts
             LLMGenerationOptions(
                 temperature = 0.15f,
                 topP = 0.9f,
-                maxTokens = when (selectedMode) {
-                    "Explain" -> 400
-                    "Debug" -> 500
-                    "Optimize" -> 500
-                    "Complexity" -> 300
-                    else -> 400
+                maxTokens = run {
+                    val codeLines = codeInput.lines().size
+                    val baseTokens = when (selectedMode) {
+                        "Explain" -> 120
+                        "Debug" -> 150
+                        "Optimize" -> 150
+                        "Complexity" -> 100
+                        else -> 150
+                    }
+                    val scaled = baseTokens + (codeLines / 5) * 30
+                    scaled.coerceAtMost(500)
                 },
                 stopSequences = listOf(
                     "<|im_end|>",
                     "<|endoftext|>",
+                    "<|end|>",
+                    "<|EOT|>",
                     "\n\n\n",
                     "User:",
                     "Human:"
@@ -263,24 +376,27 @@ class KodentViewModel : ViewModel() {
                 }
             )
         } else {
-            // Quick model gets tight parameters
             LLMGenerationOptions(
                 temperature = 0.1f,
                 topP = 0.9f,
-                maxTokens = when (selectedMode) {
-                    "Explain" -> 200
-                    "Debug" -> 250
-                    "Optimize" -> 300
-                    "Complexity" -> 150
-                    else -> 250
+                maxTokens = run {
+                    val codeLines = codeInput.lines().size
+                    val baseTokens = when (selectedMode) {
+                        "Explain" -> 80
+                        "Debug" -> 100
+                        "Optimize" -> 120
+                        "Complexity" -> 60
+                        else -> 100
+                    }
+                    val scaled = baseTokens + (codeLines / 5) * 20
+                    scaled.coerceAtMost(300)
                 },
                 stopSequences = listOf(
                     "<|im_end|>",
                     "<|endoftext|>",
                     "\n\n\n",
                     "User:",
-                    "Human:",
-                    "```\n\n"
+                    "Human:"
                 ),
                 systemPrompt = when (selectedMode) {
                     "Explain" -> """

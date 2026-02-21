@@ -42,6 +42,15 @@ import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.delay
 import com.runanywhere.kotlin_starter_example.services.ModelType
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.Stop
+import com.runanywhere.kotlin_starter_example.ui.theme.AccentViolet
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -52,12 +61,35 @@ fun KodentAnalyzerScreen(
     val kodentViewModel: KodentViewModel = viewModel()
     val scrollState = rememberScrollState()
 
+    val context = LocalContext.current
+    var hasAudioPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.RECORD_AUDIO
+            ) == PackageManager.PERMISSION_GRANTED
+        )
+    }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasAudioPermission = granted
+    }
+
     LaunchedEffect(Unit) {
         if (!modelService.isLLMLoaded &&
             !modelService.isLLMDownloading &&
             !modelService.isLLMLoading
         ) {
             modelService.downloadAndLoadLLM()
+        }
+        // Also load STT model for voice input
+        if (!modelService.isSTTLoaded &&
+            !modelService.isSTTDownloading &&
+            !modelService.isSTTLoading
+        ) {
+            modelService.downloadAndLoadSTT()
         }
     }
 
@@ -117,6 +149,10 @@ fun KodentAnalyzerScreen(
                 kodentViewModel = kodentViewModel,
                 modelService = modelService,
                 scrollState = scrollState,
+                hasAudioPermission = hasAudioPermission,
+                onRequestPermission = {
+                    permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                },
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
@@ -131,6 +167,8 @@ private fun AnalyzerContent(
     kodentViewModel: KodentViewModel,
     modelService: ModelService,
     scrollState: androidx.compose.foundation.ScrollState,
+    hasAudioPermission: Boolean,
+    onRequestPermission: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val clipboardManager = LocalClipboardManager.current
@@ -239,27 +277,112 @@ private fun AnalyzerContent(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Analyze Button
-        Button(
-            onClick = {
-                keyboardController?.hide()
-                kodentViewModel.analyze(modelService.activeModel)
-            },
+        // Analyze + Voice Row
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            enabled = !kodentViewModel.isAnalyzing
-                    && kodentViewModel.codeInput.trim().length >= 10
-                    && looksLikeKotlin(kodentViewModel.codeInput)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            if (kodentViewModel.isAnalyzing) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(18.dp),
-                    strokeWidth = 2.dp
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Analyzing...")
-            } else {
-                Text("Analyze Code")
+            // Analyze Button
+            Button(
+                onClick = {
+                    keyboardController?.hide()
+                    kodentViewModel.analyze(modelService.activeModel)
+                },
+                modifier = Modifier.weight(1f),
+                enabled = !kodentViewModel.isAnalyzing
+                        && !kodentViewModel.isListening
+                        && !kodentViewModel.isTranscribing
+                        && kodentViewModel.codeInput.trim().length >= 10
+                        && looksLikeKotlin(kodentViewModel.codeInput)
+            ) {
+                if (kodentViewModel.isAnalyzing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Analyzing...")
+                } else {
+                    Text("Analyze Code")
+                }
             }
+
+            // Mic Button
+            Button(
+                onClick = {
+                    if (!hasAudioPermission) {
+                        onRequestPermission()
+                        return@Button
+                    }
+
+                    if (kodentViewModel.isListening) {
+                        kodentViewModel.stopListeningAndProcess(modelService.activeModel)
+                    } else {
+                        keyboardController?.hide()
+                        kodentViewModel.startListening()
+                    }
+                },
+                enabled = !kodentViewModel.isAnalyzing
+                        && !kodentViewModel.isTranscribing
+                        && kodentViewModel.codeInput.trim().length >= 10
+                        && looksLikeKotlin(kodentViewModel.codeInput)
+                        && modelService.isSTTLoaded,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (kodentViewModel.isListening)
+                        AccentPink
+                    else
+                        AccentViolet
+                )
+            ) {
+                if (kodentViewModel.isTranscribing) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
+                } else {
+                    Icon(
+                        imageVector = if (kodentViewModel.isListening)
+                            Icons.Rounded.Stop
+                        else
+                            Icons.Rounded.Mic,
+                        contentDescription = if (kodentViewModel.isListening)
+                            "Stop recording"
+                        else
+                            "Voice command",
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+        }
+
+        // Voice status
+        if (kodentViewModel.isListening) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "🎤 Listening... Say: explain, debug, optimize, or complexity",
+                style = MaterialTheme.typography.labelSmall,
+                color = AccentPink
+            )
+        }
+
+        if (kodentViewModel.speechText.isNotBlank() && !kodentViewModel.isListening) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = kodentViewModel.speechText,
+                style = MaterialTheme.typography.labelSmall,
+                color = AccentViolet
+            )
+        }
+
+        // STT loading indicator
+        if (!modelService.isSTTLoaded && !modelService.isSTTDownloading && !modelService.isSTTLoading) {
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = "🎤 Voice input loading...",
+                style = MaterialTheme.typography.labelSmall,
+                color = TextMuted
+            )
         }
 
         // Cancel Button
