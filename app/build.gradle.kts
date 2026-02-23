@@ -83,4 +83,7 @@ dependencies {
     testImplementation(libs.junit)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
+
+    // Add after the coroutines dependencies
+    implementation("com.google.code.gson:gson:2.11.0")
 }

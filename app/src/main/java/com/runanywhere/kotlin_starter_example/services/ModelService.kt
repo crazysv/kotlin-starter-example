@@ -28,8 +28,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 enum class ModelType {
-    QUICK,  // SmolLM2-360M
-    DEEP    // Qwen2.5-Coder-1.5B
+    QUICK, // SmolLM2-360M
+    DEEP // Qwen2.5-Coder-1.5B
 }
 
 class ModelService : ViewModel() {

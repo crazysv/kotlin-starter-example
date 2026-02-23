@@ -56,9 +56,9 @@ import com.runanywhere.kotlin_starter_example.ui.theme.AccentViolet
 @Composable
 fun KodentAnalyzerScreen(
     onNavigateBack: () -> Unit,
-    modelService: ModelService = viewModel()
+    modelService: ModelService = viewModel(),
+    kodentViewModel: KodentViewModel
 ) {
-    val kodentViewModel: KodentViewModel = viewModel()
     val scrollState = rememberScrollState()
 
     val context = LocalContext.current
@@ -119,7 +119,13 @@ fun KodentAnalyzerScreen(
                     }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onNavigateBack) {
+                    IconButton(onClick = {
+                        if (kodentViewModel.showHistory) {
+                            kodentViewModel.toggleHistory()
+                        } else {
+                            onNavigateBack()
+                        }
+                    }) {
                         Icon(Icons.AutoMirrored.Rounded.ArrowBack, "Back")
                     }
                 },

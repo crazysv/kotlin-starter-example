@@ -21,7 +21,7 @@ import com.runanywhere.sdk.public.SDKEnvironment
 import com.runanywhere.sdk.storage.AndroidPlatformContext
 import java.io.File
 import com.runanywhere.kotlin_starter_example.kodent.ui.KodentHomeScreen
-
+import com.runanywhere.kotlin_starter_example.kodent.ui.KodentViewModel
 
 class MainActivity : ComponentActivity() {
 
@@ -64,6 +64,7 @@ fun RunAnywhereApp() {
 
     val navController = rememberNavController()
     val modelService: ModelService = viewModel()
+    val kodentViewModel: KodentViewModel = viewModel()
 
     NavHost(
         navController = navController,
@@ -84,7 +85,8 @@ fun RunAnywhereApp() {
         composable("kodent_analyzer") {
             KodentAnalyzerScreen(
                 onNavigateBack = { navController.popBackStack() },
-                modelService = modelService
+                modelService = modelService,
+                kodentViewModel = kodentViewModel
             )
         }
 

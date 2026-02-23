@@ -1,21 +1,24 @@
 package com.runanywhere.kotlin_starter_example.kodent.ui
 
+import android.app.Application
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.lifecycle.ViewModel
+import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.runanywhere.kotlin_starter_example.services.ModelType
 import com.runanywhere.sdk.public.RunAnywhere
 import com.runanywhere.sdk.public.extensions.LLM.LLMGenerationOptions
 import com.runanywhere.sdk.public.extensions.generateStream
 import com.runanywhere.sdk.public.extensions.transcribe
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-class KodentViewModel : ViewModel() {
+class KodentViewModel(application: Application) : AndroidViewModel(application) {
 
     var codeInput by mutableStateOf("")
         private set
@@ -45,6 +48,36 @@ class KodentViewModel : ViewModel() {
     private var analysisJob: Job? = null
     private val audioRecorder = AudioRecorder()
 
+    // History persistence
+    private val prefs = application.getSharedPreferences("kodent_history", android.content.Context.MODE_PRIVATE)
+    private val gson = Gson()
+
+    init {
+        loadHistory()
+    }
+
+    private fun loadHistory() {
+        try {
+            val json = prefs.getString("history", null)
+            if (json != null) {
+                val type = object : TypeToken<List<AnalysisRecord>>() {}.type
+                val loaded: List<AnalysisRecord> = gson.fromJson(json, type)
+                history = loaded.takeLast(20)
+            }
+        } catch (e: Exception) {
+            history = emptyList()
+        }
+    }
+
+    private fun saveHistory() {
+        try {
+            val json = gson.toJson(history)
+            prefs.edit().putString("history", json).apply()
+        } catch (e: Exception) {
+            // Silent fail
+        }
+    }
+
     fun updateCode(newCode: String) {
         codeInput = newCode
     }
@@ -66,6 +99,8 @@ class KodentViewModel : ViewModel() {
 
     fun clearHistory() {
         history = emptyList()
+        saveHistory()
+        showHistory = false // <--- Add this line to auto-close
     }
 
     fun clearInput() {
@@ -213,19 +248,16 @@ class KodentViewModel : ViewModel() {
                             tokenCount = localTokenCount
                         }
 
-                        // Safety timeout
                         if (System.currentTimeMillis() - startTime > maxTimeMs) {
                             analysisResult = buffer.toString()
                             return@collect
                         }
                     }
 
-                // Final flush
                 analysisResult = buffer.toString()
                 tokenCount = localTokenCount
                 analysisTimeMs = System.currentTimeMillis() - startTime
 
-                // Handle empty response
                 if (analysisResult.isBlank()) {
                     analysisResult = when (selectedMode) {
                         "Debug" -> "No bugs found. The code looks correct."
@@ -235,12 +267,13 @@ class KodentViewModel : ViewModel() {
                     }
                 }
 
-                // Save to history
+                // Save to history and persist
                 history = (history + AnalysisRecord(
                     code = codeInput,
                     mode = selectedMode,
                     result = analysisResult
                 )).takeLast(20)
+                saveHistory()
 
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) {
@@ -324,14 +357,14 @@ class KodentViewModel : ViewModel() {
                 maxTokens = run {
                     val codeLines = codeInput.lines().size
                     val baseTokens = when (selectedMode) {
-                        "Explain" -> 120
-                        "Debug" -> 150
-                        "Optimize" -> 150
-                        "Complexity" -> 100
-                        else -> 150
+                        "Explain" -> 350
+                        "Debug" -> 350
+                        "Optimize" -> 350
+                        "Complexity" -> 200
+                        else -> 350
                     }
-                    val scaled = baseTokens + (codeLines / 5) * 30
-                    scaled.coerceAtMost(500)
+                    val scaled = baseTokens + (codeLines / 5) * 40
+                    scaled.coerceAtMost(8000)
                 },
                 stopSequences = listOf(
                     "<|im_end|>",
@@ -382,14 +415,14 @@ class KodentViewModel : ViewModel() {
                 maxTokens = run {
                     val codeLines = codeInput.lines().size
                     val baseTokens = when (selectedMode) {
-                        "Explain" -> 80
-                        "Debug" -> 100
-                        "Optimize" -> 120
-                        "Complexity" -> 60
-                        else -> 100
+                        "Explain" -> 250
+                        "Debug" -> 250
+                        "Optimize" -> 250
+                        "Complexity" ->150
+                        else -> 200
                     }
-                    val scaled = baseTokens + (codeLines / 5) * 20
-                    scaled.coerceAtMost(300)
+                    val scaled = baseTokens + (codeLines / 5) * 30
+                    scaled.coerceAtMost(600)
                 },
                 stopSequences = listOf(
                     "<|im_end|>",
