@@ -1,56 +1,55 @@
 package com.runanywhere.kotlin_starter_example.kodent.ui
 
-import androidx.compose.foundation.clickable
+import android.Manifest
+import android.content.pm.PackageManager
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
-import androidx.compose.material.icons.rounded.History
-import androidx.compose.material.icons.rounded.DeleteSweep
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.ContentCopy
-import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.DeleteSweep
+import androidx.compose.material.icons.rounded.History
+import androidx.compose.material.icons.rounded.Mic
+import androidx.compose.material.icons.rounded.Stop
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.runanywhere.kotlin_starter_example.kodent.engine.CodeValidator
 import com.runanywhere.kotlin_starter_example.services.ModelService
+import com.runanywhere.kotlin_starter_example.services.ModelType
 import com.runanywhere.kotlin_starter_example.ui.components.ModelLoaderWidget
-import com.runanywhere.kotlin_starter_example.ui.theme.PrimaryDark
 import com.runanywhere.kotlin_starter_example.ui.theme.AccentCyan
-import com.runanywhere.kotlin_starter_example.ui.theme.AccentPink
 import com.runanywhere.kotlin_starter_example.ui.theme.AccentGreen
 import com.runanywhere.kotlin_starter_example.ui.theme.AccentOrange
+import com.runanywhere.kotlin_starter_example.ui.theme.AccentPink
+import com.runanywhere.kotlin_starter_example.ui.theme.AccentViolet
+import com.runanywhere.kotlin_starter_example.ui.theme.PrimaryDark
 import com.runanywhere.kotlin_starter_example.ui.theme.TextMuted
+import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlinx.coroutines.delay
-import com.runanywhere.kotlin_starter_example.services.ModelType
-import android.Manifest
-import android.content.pm.PackageManager
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.ui.platform.LocalContext
-import androidx.core.content.ContextCompat
-import androidx.compose.material.icons.rounded.Mic
-import androidx.compose.material.icons.rounded.Stop
-import com.runanywhere.kotlin_starter_example.ui.theme.AccentViolet
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -60,8 +59,8 @@ fun KodentAnalyzerScreen(
     kodentViewModel: KodentViewModel
 ) {
     val scrollState = rememberScrollState()
-
     val context = LocalContext.current
+
     var hasAudioPermission by remember {
         mutableStateOf(
             ContextCompat.checkSelfPermission(
@@ -77,22 +76,17 @@ fun KodentAnalyzerScreen(
         hasAudioPermission = granted
     }
 
+    // Auto-load models
     LaunchedEffect(Unit) {
-        if (!modelService.isLLMLoaded &&
-            !modelService.isLLMDownloading &&
-            !modelService.isLLMLoading
-        ) {
+        if (!modelService.isLLMLoaded && !modelService.isLLMDownloading && !modelService.isLLMLoading) {
             modelService.downloadAndLoadLLM()
         }
-        // Also load STT model for voice input
-        if (!modelService.isSTTLoaded &&
-            !modelService.isSTTDownloading &&
-            !modelService.isSTTLoading
-        ) {
+        if (!modelService.isSTTLoaded && !modelService.isSTTDownloading && !modelService.isSTTLoading) {
             modelService.downloadAndLoadSTT()
         }
     }
 
+    // Auto-scroll during streaming
     LaunchedEffect(kodentViewModel.analysisResult) {
         if (kodentViewModel.isAnalyzing) {
             delay(50)
@@ -106,15 +100,19 @@ fun KodentAnalyzerScreen(
             TopAppBar(
                 title = {
                     Column {
-                        Text("Kodent")
+                        Text("Kodent", fontWeight = FontWeight.Bold)
                         Text(
-                            text = when (modelService.activeModel) {
-                                ModelType.QUICK -> "🚀 Quick Mode"
-                                ModelType.DEEP -> "🧠 Deep Mode"
+                            text = when {
+                                kodentViewModel.isAnalyzing ->
+                                    "⏳ Analyzing... ${kodentViewModel.tokenCount} tokens"
+                                modelService.activeModel == ModelType.QUICK ->
+                                    "🚀 Quick Mode"
+                                modelService.activeModel == ModelType.DEEP ->
+                                    "🧠 Deep Mode"
                                 else -> "No model loaded"
                             },
                             style = MaterialTheme.typography.labelSmall,
-                            color = TextMuted
+                            color = if (kodentViewModel.isAnalyzing) AccentOrange else TextMuted
                         )
                     }
                 },
@@ -130,16 +128,28 @@ fun KodentAnalyzerScreen(
                     }
                 },
                 actions = {
+                    // Stop button during analysis
+                    if (kodentViewModel.isAnalyzing) {
+                        IconButton(onClick = { kodentViewModel.cancelAnalysis() }) {
+                            Icon(Icons.Rounded.Stop, "Stop", tint = AccentPink)
+                        }
+                    }
+
+                    // History button
                     if (kodentViewModel.history.isNotEmpty()) {
                         IconButton(onClick = { kodentViewModel.toggleHistory() }) {
-                            Icon(Icons.Rounded.History, "History")
+                            Icon(
+                                Icons.Rounded.History,
+                                "History",
+                                tint = if (kodentViewModel.showHistory) AccentCyan
+                                else Color.White
+                            )
                         }
                     }
                 }
             )
         }
     ) { padding ->
-
         if (kodentViewModel.showHistory) {
             HistoryContent(
                 history = kodentViewModel.history,
@@ -182,6 +192,7 @@ private fun AnalyzerContent(
 
     Column(modifier = modifier) {
 
+        // Model loader
         if (!modelService.isLLMLoaded) {
             ModelLoaderWidget(
                 modelName = "SmolLM2 360M",
@@ -194,26 +205,92 @@ private fun AnalyzerContent(
             return
         }
 
-        // Mode Selection
+        // ── Error Banner ──
+        kodentViewModel.errorMessage?.let { error ->
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = AccentPink.copy(alpha = 0.15f)
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "❌ " + error,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = AccentPink,
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(
+                        onClick = { kodentViewModel.clearError() },
+                        modifier = Modifier.size(24.dp)
+                    ) {
+                        Icon(Icons.Rounded.Close, "Dismiss", tint = AccentPink)
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+
+        // ── Language Selection ──
+        Text(
+            text = "Language: " + kodentViewModel.selectedLanguage,
+            style = MaterialTheme.typography.labelSmall,
+            color = TextMuted,
+            modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
+        )
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            listOf("Explain", "Debug", "Optimize", "Complexity").forEach { mode ->
-                val modeColor = badgeColorFor(mode)
+            val languages = listOf(
+                "Kotlin", "Java", "Python", "JS", "C++", "Swift", "Dart", "Go"
+            )
+            languages.forEach { lang ->
+                FilterChip(
+                    selected = kodentViewModel.selectedLanguage == lang,
+                    onClick = { kodentViewModel.updateLanguage(lang) },
+                    label = { Text(lang, fontSize = 12.sp) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = AccentViolet.copy(alpha = 0.2f),
+                        selectedLabelColor = AccentViolet
+                    )
+                )
+            }
+        }
 
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // ── Mode Selection ──
+        Text(
+            text = "Analysis Mode",
+            style = MaterialTheme.typography.labelSmall,
+            color = TextMuted,
+            modifier = Modifier.padding(start = 4.dp, bottom = 4.dp)
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            listOf(
+                "Explain" to "💡",
+                "Debug" to "🐛",
+                "Optimize" to "⚡",
+                "Complexity" to "📊"
+            ).forEach { (mode, emoji) ->
                 FilterChip(
                     selected = kodentViewModel.selectedMode == mode,
                     onClick = { kodentViewModel.selectMode(mode) },
-                    label = { Text(mode, fontSize = 12.sp) },
+                    label = { Text(emoji + " " + mode) },
                     colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = modeColor.copy(alpha = 0.2f),
-                        selectedLabelColor = modeColor
-                    ),
-                    border = FilterChipDefaults.filterChipBorder(
-                        selectedBorderColor = modeColor,
-                        enabled = true,
-                        selected = kodentViewModel.selectedMode == mode
+                        selectedContainerColor = badgeColorFor(mode).copy(alpha = 0.2f),
+                        selectedLabelColor = badgeColorFor(mode)
                     )
                 )
             }
@@ -221,14 +298,14 @@ private fun AnalyzerContent(
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Code Input
+        // ── Code Input ──
         OutlinedTextField(
             value = kodentViewModel.codeInput,
             onValueChange = { kodentViewModel.updateCode(it) },
-            label = { Text("Paste Kotlin code") },
+            label = { Text("Paste " + kodentViewModel.selectedLanguage + " code") },
             placeholder = {
                 Text(
-                    text = "fun example() {\n    println(\"Hello\")\n}",
+                    text = "Paste code here...",
                     fontFamily = FontFamily.Monospace,
                     fontSize = 13.sp,
                     color = TextMuted.copy(alpha = 0.4f)
@@ -257,38 +334,29 @@ private fun AnalyzerContent(
             }
         )
 
-        // Kotlin detection
+        // ── Code Detection Status ──
         if (kodentViewModel.codeInput.isNotBlank()) {
             Spacer(modifier = Modifier.height(4.dp))
-
             val charCount = kodentViewModel.codeInput.trim().length
-            val lineCount = kodentViewModel.codeInput.lines().size
+            val isCode = CodeValidator.looksLikeCode(kodentViewModel.codeInput)
 
             Text(
-                text = when {
-                    charCount < 10 -> "⚠️ Too short • $charCount chars"
-                    !looksLikeKotlin(kodentViewModel.codeInput) -> "⚠️ May not be valid Kotlin • $lineCount lines • $charCount chars"
-                    lineCount > 40 -> "✅ Kotlin • ⚠️ Long code may reduce accuracy • $lineCount lines • $charCount chars"
-                    else -> "✅ Looks like Kotlin • $lineCount lines • $charCount chars"
+                text = if (isCode) {
+                    "✅ Looks like code • " + charCount + " chars"
+                } else {
+                    "⚠️ Doesn't look like code"
                 },
                 style = MaterialTheme.typography.labelSmall,
-                color = when {
-                    charCount < 10 -> AccentOrange
-                    !looksLikeKotlin(kodentViewModel.codeInput) -> AccentOrange
-                    lineCount > 40 -> AccentOrange
-                    else -> TextMuted
-                }
+                color = if (isCode) AccentGreen else AccentOrange
             )
         }
 
         Spacer(modifier = Modifier.height(12.dp))
 
-        // Analyze + Voice Row
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            // Analyze Button
+        // ── Action Buttons ──
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+
+            // Analyze button
             Button(
                 onClick = {
                     keyboardController?.hide()
@@ -297,173 +365,139 @@ private fun AnalyzerContent(
                 modifier = Modifier.weight(1f),
                 enabled = !kodentViewModel.isAnalyzing
                         && !kodentViewModel.isListening
-                        && !kodentViewModel.isTranscribing
-                        && kodentViewModel.codeInput.trim().length >= 10
-                        && looksLikeKotlin(kodentViewModel.codeInput)
+                        && CodeValidator.looksLikeCode(kodentViewModel.codeInput)
             ) {
                 if (kodentViewModel.isAnalyzing) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(18.dp),
-                        strokeWidth = 2.dp
+                        strokeWidth = 2.dp,
+                        color = Color.White
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Analyzing...")
                 } else {
-                    Text("Analyze Code")
+                    Text("🔍 Analyze")
                 }
             }
 
-            // Mic Button
+            // Voice button
             Button(
                 onClick = {
                     if (!hasAudioPermission) {
                         onRequestPermission()
-                        return@Button
-                    }
-
-                    if (kodentViewModel.isListening) {
+                    } else if (kodentViewModel.isListening) {
                         kodentViewModel.stopListeningAndProcess(modelService.activeModel)
                     } else {
-                        keyboardController?.hide()
                         kodentViewModel.startListening()
                     }
                 },
-                enabled = !kodentViewModel.isAnalyzing
-                        && !kodentViewModel.isTranscribing
-                        && kodentViewModel.codeInput.trim().length >= 10
-                        && looksLikeKotlin(kodentViewModel.codeInput)
-                        && modelService.isSTTLoaded,
+                enabled = !kodentViewModel.isAnalyzing && modelService.isSTTLoaded,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (kodentViewModel.isListening)
-                        AccentPink
-                    else
-                        AccentViolet
+                    containerColor = when {
+                        kodentViewModel.isListening -> AccentPink
+                        kodentViewModel.isTranscribing -> AccentOrange
+                        else -> AccentViolet
+                    }
                 )
             ) {
                 if (kodentViewModel.isTranscribing) {
                     CircularProgressIndicator(
                         modifier = Modifier.size(18.dp),
                         strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary
+                        color = Color.White
                     )
                 } else {
                     Icon(
-                        imageVector = if (kodentViewModel.isListening)
-                            Icons.Rounded.Stop
-                        else
-                            Icons.Rounded.Mic,
-                        contentDescription = if (kodentViewModel.isListening)
-                            "Stop recording"
-                        else
-                            "Voice command",
-                        modifier = Modifier.size(20.dp)
+                        if (kodentViewModel.isListening) Icons.Rounded.Stop
+                        else Icons.Rounded.Mic,
+                        null
                     )
                 }
             }
         }
 
-        // Voice status
+        // ── Voice Status ──
         if (kodentViewModel.isListening) {
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "🎤 Listening... Say: explain, debug, optimize, or complexity",
+                "🎤 Listening... say: explain, debug, optimize, or complexity",
                 style = MaterialTheme.typography.labelSmall,
                 color = AccentPink
             )
         }
-
         if (kodentViewModel.speechText.isNotBlank() && !kodentViewModel.isListening) {
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = kodentViewModel.speechText,
+                kodentViewModel.speechText,
                 style = MaterialTheme.typography.labelSmall,
                 color = AccentViolet
             )
         }
 
-        // STT loading indicator
-        if (!modelService.isSTTLoaded && !modelService.isSTTDownloading && !modelService.isSTTLoading) {
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "🎤 Voice input loading...",
-                style = MaterialTheme.typography.labelSmall,
-                color = TextMuted
-            )
-        }
-
-        // Cancel Button
-        if (kodentViewModel.isAnalyzing) {
-            Spacer(modifier = Modifier.height(6.dp))
-            OutlinedButton(
-                onClick = { kodentViewModel.cancelAnalysis() },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Cancel")
-            }
-        }
-
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Result Header
+        // ── Result Area ──
         if (kodentViewModel.analysisResult.isNotBlank()) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                val badgeColor = badgeColorFor(kodentViewModel.selectedMode)
 
-                Surface(
-                    color = badgeColor.copy(alpha = 0.2f),
-                    shape = MaterialTheme.shapes.small
-                ) {
-                    Text(
-                        text = kodentViewModel.selectedMode,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = badgeColor
-                    )
-                }
+            // Result header with metrics
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Result",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.Bold
+                )
 
                 Spacer(modifier = Modifier.width(8.dp))
 
-                Text(
-                    text = "Analysis Result",
-                    style = MaterialTheme.typography.titleSmall
-                )
-
-                if (kodentViewModel.isAnalyzing) {
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "streaming...",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = TextMuted
-                    )
+                // Metrics chip
+                if (kodentViewModel.analysisTimeMs > 0) {
+                    Surface(
+                        color = AccentCyan.copy(alpha = 0.1f),
+                        shape = MaterialTheme.shapes.small
+                    ) {
+                        val metricsText = buildString {
+                            append(kodentViewModel.tokenCount)
+                            append(" tokens • ")
+                            append(kodentViewModel.analysisTimeMs / 1000)
+                            append("s")
+                            if (kodentViewModel.tokensPerSecond > 0) {
+                                append(" • ")
+                                append(
+                                    String.format("%.1f", kodentViewModel.tokensPerSecond)
+                                )
+                                append(" t/s")
+                            }
+                        }
+                        Text(
+                            text = metricsText,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = AccentCyan,
+                            modifier = Modifier.padding(
+                                horizontal = 8.dp,
+                                vertical = 2.dp
+                            )
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.weight(1f))
 
-                if (!kodentViewModel.isAnalyzing) {
-                    IconButton(onClick = {
-                        clipboardManager.setText(AnnotatedString(kodentViewModel.analysisResult))
-                    }) {
-                        Icon(
-                            Icons.Rounded.ContentCopy,
-                            contentDescription = "Copy result",
-                            modifier = Modifier.size(18.dp),
-                            tint = AccentCyan
-                        )
-                    }
+                // Copy button
+                IconButton(onClick = {
+                    clipboardManager.setText(
+                        AnnotatedString(kodentViewModel.analysisResult)
+                    )
+                }) {
+                    Icon(Icons.Rounded.ContentCopy, "Copy", tint = AccentCyan)
+                }
 
-                    IconButton(onClick = { kodentViewModel.clearResult() }) {
-                        Icon(
-                            Icons.Rounded.Close,
-                            contentDescription = "Clear result",
-                            modifier = Modifier.size(18.dp),
-                            tint = TextMuted
-                        )
-                    }
+                // Clear result button
+                IconButton(onClick = { kodentViewModel.clearResult() }) {
+                    Icon(Icons.Rounded.Close, "Clear", tint = TextMuted)
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
-
+            // Progress bar during streaming
             if (kodentViewModel.isAnalyzing) {
                 LinearProgressIndicator(
                     modifier = Modifier
@@ -471,230 +505,124 @@ private fun AnalyzerContent(
                         .height(2.dp),
                     color = badgeColorFor(kodentViewModel.selectedMode)
                 )
-                Spacer(modifier = Modifier.height(8.dp))
             }
-        }
 
-        // Stats row
-        if (!kodentViewModel.isAnalyzing && kodentViewModel.tokenCount > 0) {
             Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = "${kodentViewModel.tokenCount} tokens • ${kodentViewModel.analysisTimeMs / 1000.0}s",
-                style = MaterialTheme.typography.labelSmall,
-                color = TextMuted
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-        }
 
-        // Result
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .verticalScroll(scrollState)
-        ) {
-            if (kodentViewModel.errorMessage != null) {
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = AccentPink.copy(alpha = 0.1f)
-                    )
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp)
-                    ) {
-                        Text(
-                            text = "❌ Error",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = AccentPink
-                        )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        Text(
-                            text = kodentViewModel.errorMessage ?: "",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = TextMuted
-                        )
-
-                        Spacer(modifier = Modifier.height(12.dp))
-
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(
-                                onClick = { kodentViewModel.analyze(modelService.activeModel) },
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = AccentPink
-                                )
-                            ) {
-                                Icon(
-                                    Icons.Rounded.Refresh,
-                                    contentDescription = "Retry",
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Retry")
-                            }
-
-                            OutlinedButton(
-                                onClick = { kodentViewModel.clearError() }
-                            ) {
-                                Text("Dismiss")
-                            }
-                        }
-                    }
-                }
-            } else if (kodentViewModel.analysisResult.isNotBlank()) {
+            // Result content in card
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = badgeColorFor(kodentViewModel.selectedMode)
+                        .copy(alpha = 0.05f)
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
                 SelectionContainer {
                     Text(
-                        text = if (kodentViewModel.isAnalyzing)
-                            kodentViewModel.analysisResult + " ▌"
-                        else
-                            kodentViewModel.analysisResult,
+                        text = kodentViewModel.analysisResult,
                         style = MaterialTheme.typography.bodyMedium.copy(
                             fontFamily = FontFamily.Monospace,
-                            fontSize = 13.sp,
                             lineHeight = 20.sp
-                        )
+                        ),
+                        modifier = Modifier
+                            .padding(12.dp)
+                            .verticalScroll(scrollState)
                     )
                 }
-            } else if (!kodentViewModel.isAnalyzing) {
-                Text(
-                    text = "Paste Kotlin code above and tap Analyze",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = TextMuted
-                )
             }
         }
     }
 }
+
+// ── History ──
 
 @Composable
 private fun HistoryContent(
     history: List<AnalysisRecord>,
     onItemClick: (AnalysisRecord) -> Unit,
     onClearClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier
 ) {
     Column(modifier = modifier) {
-
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "Analysis History",
-                style = MaterialTheme.typography.titleMedium
+                "History (" + history.size + ")",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
             )
-
-            IconButton(onClick = onClearClick) {
-                Icon(
-                    Icons.Rounded.DeleteSweep,
-                    contentDescription = "Clear history",
-                    tint = AccentPink
-                )
+            TextButton(onClick = onClearClick) {
+                Icon(Icons.Rounded.DeleteSweep, null, tint = AccentPink)
+                Spacer(Modifier.width(4.dp))
+                Text("Clear All", color = AccentPink)
             }
         }
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        Text(
-            text = "${history.size} analyses saved",
-            style = MaterialTheme.typography.bodySmall,
-            color = TextMuted
-        )
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            history.reversed().forEach { record ->
-                HistoryCard(
-                    record = record,
-                    onClick = { onItemClick(record) }
-                )
+        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            items(history.size) { i ->
+                val record = history[history.size - 1 - i]
+                HistoryCard(record) { onItemClick(record) }
             }
         }
     }
 }
 
 @Composable
-private fun HistoryCard(
-    record: AnalysisRecord,
-    onClick: () -> Unit
-) {
-    val modeColor = badgeColorFor(record.mode)
-    val timeFormat = SimpleDateFormat("HH:mm", Locale.getDefault())
-    val timeString = timeFormat.format(Date(record.timestamp))
-
+private fun HistoryCard(record: AnalysisRecord, onClick: () -> Unit) {
     Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() },
-        shape = RoundedCornerShape(12.dp),
+        onClick = onClick,
         colors = CardDefaults.cardColors(
-            containerColor = modeColor.copy(alpha = 0.08f)
+            containerColor = badgeColorFor(record.mode).copy(alpha = 0.08f)
         )
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp)
-        ) {
+        Column(modifier = Modifier.padding(12.dp)) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                modifier = Modifier.fillMaxWidth()
             ) {
-                Surface(
-                    color = modeColor.copy(alpha = 0.2f),
-                    shape = MaterialTheme.shapes.small
-                ) {
+                Row {
                     Text(
-                        text = record.mode,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = modeColor
+                        modeEmoji(record.mode),
+                        fontSize = 14.sp
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        record.mode,
+                        color = badgeColorFor(record.mode),
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        record.language,
+                        color = AccentViolet,
+                        style = MaterialTheme.typography.labelSmall
                     )
                 }
-
                 Text(
-                    text = timeString,
+                    SimpleDateFormat("MMM d, HH:mm", Locale.getDefault())
+                        .format(Date(record.timestamp)),
                     style = MaterialTheme.typography.labelSmall,
                     color = TextMuted
                 )
             }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = record.code.lines().take(3).joinToString("\n"),
-                style = MaterialTheme.typography.bodySmall.copy(
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 11.sp
-                ),
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
-                color = TextMuted
-            )
-
             Spacer(modifier = Modifier.height(4.dp))
-
             Text(
-                text = record.result.take(100) + if (record.result.length > 100) "..." else "",
+                record.code.take(80).replace("\n", " "),
+                maxLines = 1,
                 style = MaterialTheme.typography.bodySmall,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
+                color = TextMuted
             )
         }
     }
 }
+
+// ── Helpers ──
 
 private fun badgeColorFor(mode: String): Color {
     return when (mode) {
@@ -703,5 +631,15 @@ private fun badgeColorFor(mode: String): Color {
         "Optimize" -> AccentGreen
         "Complexity" -> AccentOrange
         else -> AccentCyan
+    }
+}
+
+private fun modeEmoji(mode: String): String {
+    return when (mode) {
+        "Explain" -> "💡"
+        "Debug" -> "🐛"
+        "Optimize" -> "⚡"
+        "Complexity" -> "📊"
+        else -> "🔍"
     }
 }

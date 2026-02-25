@@ -17,6 +17,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.runanywhere.kotlin_starter_example.kodent.engine.GenerationConfig
+import com.runanywhere.kotlin_starter_example.kodent.engine.OutputProcessor
+import com.runanywhere.kotlin_starter_example.kodent.engine.PromptEngine
+import com.runanywhere.kotlin_starter_example.kodent.engine.StreamRepetitionDetector
+import kotlinx.coroutines.CancellationException
+import com.runanywhere.kotlin_starter_example.kodent.engine.CodeValidator
 
 class KodentViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -45,11 +51,25 @@ class KodentViewModel(application: Application) : AndroidViewModel(application) 
     var speechText by mutableStateOf("")
         private set
 
+    // Default to Kotlin, but allow changing
+    var selectedLanguage by mutableStateOf("Kotlin")
+        private set
+
+    var tokensPerSecond by mutableStateOf(0f)
+        private set
+
+    fun updateLanguage(lang: String) {
+        selectedLanguage = lang
+    }
+
     private var analysisJob: Job? = null
     private val audioRecorder = AudioRecorder()
 
+    private val repetitionDetector = StreamRepetitionDetector()
+
     // History persistence
-    private val prefs = application.getSharedPreferences("kodent_history", android.content.Context.MODE_PRIVATE)
+    private val prefs =
+        application.getSharedPreferences("kodent_history", android.content.Context.MODE_PRIVATE)
     private val gson = Gson()
 
     init {
@@ -93,6 +113,7 @@ class KodentViewModel(application: Application) : AndroidViewModel(application) 
     fun loadFromHistory(record: AnalysisRecord) {
         codeInput = record.code
         selectedMode = record.mode
+        selectedLanguage = record.language  // ← ADD THIS
         analysisResult = record.result
         showHistory = false
     }
@@ -109,6 +130,9 @@ class KodentViewModel(application: Application) : AndroidViewModel(application) 
 
     fun clearResult() {
         analysisResult = ""
+        tokenCount = 0
+        tokensPerSecond = 0f
+        analysisTimeMs = 0L
     }
 
     fun clearError() {
@@ -189,9 +213,18 @@ class KodentViewModel(application: Application) : AndroidViewModel(application) 
 
         val detectedMode = when {
             lower.contains("explain") || lower.contains("what does") || lower.contains("what is") -> "Explain"
-            lower.contains("debug") || lower.contains("bug") || lower.contains("error") || lower.contains("fix") -> "Debug"
-            lower.contains("optimize") || lower.contains("improve") || lower.contains("better") || lower.contains("faster") -> "Optimize"
-            lower.contains("complex") || lower.contains("big o") || lower.contains("time") && lower.contains("space") -> "Complexity"
+            lower.contains("debug") || lower.contains("bug") || lower.contains("error") || lower.contains(
+                "fix"
+            ) -> "Debug"
+
+            lower.contains("optimize") || lower.contains("improve") || lower.contains("better") || lower.contains(
+                "faster"
+            ) -> "Optimize"
+
+            lower.contains("complex") || lower.contains("big o") || lower.contains("time") && lower.contains(
+                "space"
+            ) -> "Complexity"
+
             lower.contains("analyze") || lower.contains("check") || lower.contains("review") -> "Explain"
             else -> null
         }
@@ -210,12 +243,13 @@ class KodentViewModel(application: Application) : AndroidViewModel(application) 
         if (codeInput.isBlank() || isAnalyzing) return
 
         if (codeInput.trim().length < 10) {
-            analysisResult = "Input does not appear to be valid Kotlin code."
+            analysisResult = "⚠️ Code is too short to analyze."
             return
         }
 
-        if (!looksLikeKotlin(codeInput)) {
-            analysisResult = "Invalid Kotlin code. Please provide valid Kotlin syntax."
+        if (!CodeValidator.looksLikeCode(codeInput)) {
+            analysisResult =
+                "⚠️ Doesn't look like code. Please paste valid ${selectedLanguage} code."
             return
         }
 
@@ -228,70 +262,113 @@ class KodentViewModel(application: Application) : AndroidViewModel(application) 
                 analysisResult = ""
                 errorMessage = null
                 tokenCount = 0
+                tokensPerSecond = 0f
                 analysisTimeMs = 0L
+                repetitionDetector.reset()
 
-                val userPrompt = buildUserPrompt(isDeep)
-                val options = buildOptions(isDeep)
+                // ✅ Use PromptEngine (fixes ${'$'} bug and code fence bug)
+                val prompt = PromptEngine.build(
+                    code = codeInput,
+                    mode = selectedMode,
+                    language = selectedLanguage,
+                    modelType = if (isDeep) "deep" else "quick"
+                )
+
+                // ✅ Use GenerationConfig (per-mode parameters)
+                val genConfig = GenerationConfig.forMode(selectedMode)
+
+                val options = LLMGenerationOptions(
+                    temperature = if (isDeep) genConfig.temperature else genConfig.temperature * 0.8f,
+                    topP = genConfig.topP,
+                    maxTokens = if (isDeep) {
+                        (genConfig.maxTokens * 1.5f).toInt().coerceAtMost(500)
+                    } else {
+                        genConfig.maxTokens
+                    },
+                    stopSequences = genConfig.stopSequences,
+                    systemPrompt = buildSystemPrompt(isDeep)
+                )
 
                 val buffer = StringBuilder()
                 var localTokenCount = 0
                 val startTime = System.currentTimeMillis()
-                val maxTimeMs = if (isDeep) 120_000L else 60_000L
+                val maxTimeMs = if (isDeep) 90_000L else 45_000L
 
-                RunAnywhere.generateStream(userPrompt, options)
+                RunAnywhere.generateStream(prompt, options)
                     .collect { token ->
+                        val elapsed = System.currentTimeMillis() - startTime
+
+                        // ✅ Timeout protection
+                        if (elapsed > maxTimeMs) {
+                            buffer.append("\n\n⏱️ Time limit reached.")
+                            analysisResult = buffer.toString()
+                            analysisJob?.cancel()
+                            return@collect
+                        }
+
+                        // ✅ Repetition detection (NEW)
+                        if (repetitionDetector.shouldStop(token)) {
+                            analysisResult = buffer.toString()
+                            analysisJob?.cancel()
+                            return@collect
+                        }
+
                         buffer.append(token)
                         localTokenCount++
 
-                        if (localTokenCount % 3 == 0 || token.contains("\n")) {
-                            analysisResult = buffer.toString()
-                            tokenCount = localTokenCount
-                        }
+                        // ✅ Update EVERY token (was every 3 — choppy)
+                        analysisResult = buffer.toString()
+                        tokenCount = localTokenCount
 
-                        if (System.currentTimeMillis() - startTime > maxTimeMs) {
-                            analysisResult = buffer.toString()
-                            return@collect
+                        // ✅ Tokens/sec tracking (NEW)
+                        val elapsedSec = elapsed / 1000.0f
+                        if (elapsedSec > 0.5f) {
+                            tokensPerSecond = localTokenCount / elapsedSec
                         }
                     }
 
-                analysisResult = buffer.toString()
+                // ✅ Post-process output (NEW — cleans artifacts)
+                analysisResult = OutputProcessor.process(buffer.toString(), selectedMode)
                 tokenCount = localTokenCount
                 analysisTimeMs = System.currentTimeMillis() - startTime
 
                 if (analysisResult.isBlank()) {
                     analysisResult = when (selectedMode) {
-                        "Debug" -> "No bugs found. The code looks correct."
-                        "Optimize" -> "Code looks good. No major improvements needed."
-                        "Complexity" -> "Unable to determine complexity for this code."
-                        else -> "No output generated. Try rephrasing or shorter code."
+                        "Debug" -> "✅ No bugs found."
+                        "Optimize" -> "✅ Code looks good."
+                        "Complexity" -> "⚠️ Unable to determine complexity."
+                        else -> "⚠️ No output. Try shorter code."
                     }
                 }
 
-                // Save to history and persist
+                // Save to history (with language)
                 history = (history + AnalysisRecord(
                     code = codeInput,
                     mode = selectedMode,
+                    language = selectedLanguage,
                     result = analysisResult
                 )).takeLast(20)
                 saveHistory()
 
             } catch (e: Exception) {
-                if (e is kotlinx.coroutines.CancellationException) {
-                    analysisResult += "\n\n⚠️ Analysis cancelled."
+                if (e is CancellationException) {
+                    if (analysisResult.isNotBlank()) {
+                        analysisResult = OutputProcessor.process(analysisResult, selectedMode)
+                        if (!analysisResult.contains("⏱️")) {
+                            analysisResult += "\n\n⚠️ Generation stopped."
+                        }
+                    }
                     throw e
                 }
                 analysisResult = ""
                 errorMessage = when {
-                    e.message?.contains("model", ignoreCase = true) == true ->
-                        "Model error. Try reloading the model."
-                    e.message?.contains("memory", ignoreCase = true) == true ->
-                        "Not enough memory. Try shorter code."
-                    e.message?.contains("timeout", ignoreCase = true) == true ->
-                        "Analysis timed out. Try shorter code."
-                    e.message?.contains("load", ignoreCase = true) == true ->
-                        "Model not loaded. Go back and load the model."
-                    else ->
-                        "Analysis failed: ${e.message ?: "Unknown error"}"
+                    e.message?.contains("model", true) == true -> "Model error. Try reloading."
+                    e.message?.contains(
+                        "memory",
+                        true
+                    ) == true -> "Not enough memory. Try shorter code."
+
+                    else -> "Analysis failed: ${e.message ?: "Unknown error"}"
                 }
             } finally {
                 isAnalyzing = false
@@ -299,214 +376,25 @@ class KodentViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    private fun buildUserPrompt(isDeep: Boolean): String {
+    private fun buildSystemPrompt(isDeep: Boolean): String {
+        val lang = selectedLanguage  // ✅ No more ${'$'} bug
+
         return if (isDeep) {
             when (selectedMode) {
-                "Explain" -> """
-                    Analyze this Kotlin code and explain what it does step by step:
-                    ```kotlin
-                    $codeInput
-                    ```
-                    Explain the purpose, how it works, and what it returns.
-                """.trimIndent()
-
-                "Debug" -> """
-                    Carefully analyze this Kotlin code for bugs:
-                    ```kotlin
-                    $codeInput
-                    ```
-                    Check for: null safety issues, type errors, logic errors, edge cases, and runtime exceptions.
-                    If no bugs exist, say "No bugs found."
-                """.trimIndent()
-
-                "Optimize" -> """
-                    Review this Kotlin code and suggest improvements:
-                    ```kotlin
-                    $codeInput
-                    ```
-                    Consider: Kotlin idioms, performance, readability, and best practices.
-                    Show the improved code if applicable.
-                """.trimIndent()
-
-                "Complexity" -> """
-                    Analyze the time and space complexity of this Kotlin code:
-                    ```kotlin
-                    $codeInput
-                    ```
-                    Provide Big-O notation with detailed justification.
-                """.trimIndent()
-
-                else -> codeInput
+                "Explain" -> "You are an expert $lang developer. Explain code clearly and thoroughly. Be structured."
+                "Debug" -> "You are a senior $lang reviewer. Find real bugs only. If none, say 'No bugs found.' Don't invent problems."
+                "Optimize" -> "You are a senior $lang developer. Suggest concrete improvements. Show improved code if applicable."
+                "Complexity" -> "You are an algorithm expert. Provide Big-O for time and space. Analyze loops and data structures."
+                else -> "You are an expert $lang code analyst."
             }
         } else {
             when (selectedMode) {
-                "Explain" -> "Analyze this Kotlin code:\n```kotlin\n$codeInput\n```\nWhat does this code do?"
-                "Debug" -> "Find bugs in this Kotlin code:\n```kotlin\n$codeInput\n```"
-                "Optimize" -> "Suggest improvements for this Kotlin code:\n```kotlin\n$codeInput\n```"
-                "Complexity" -> "What is the time and space complexity of this code?\n```kotlin\n$codeInput\n```"
-                else -> codeInput
+                "Explain" -> "You are a $lang explainer. Explain in 2-3 sentences. Be direct."
+                "Debug" -> "You are a $lang debugger. List only real bugs. If none, say 'No bugs found.'"
+                "Optimize" -> "You are a $lang reviewer. Suggest max 3 improvements."
+                "Complexity" -> "State time and space complexity in Big-O. One sentence explanation."
+                else -> "You are a $lang code analyst."
             }
         }
     }
-
-    private fun buildOptions(isDeep: Boolean): LLMGenerationOptions {
-        return if (isDeep) {
-            LLMGenerationOptions(
-                temperature = 0.15f,
-                topP = 0.9f,
-                maxTokens = run {
-                    val codeLines = codeInput.lines().size
-                    val baseTokens = when (selectedMode) {
-                        "Explain" -> 350
-                        "Debug" -> 350
-                        "Optimize" -> 350
-                        "Complexity" -> 200
-                        else -> 350
-                    }
-                    val scaled = baseTokens + (codeLines / 5) * 40
-                    scaled.coerceAtMost(8000)
-                },
-                stopSequences = listOf(
-                    "<|im_end|>",
-                    "<|endoftext|>",
-                    "<|end|>",
-                    "<|EOT|>",
-                    "\n\n\n",
-                    "User:",
-                    "Human:"
-                ),
-                systemPrompt = when (selectedMode) {
-                    "Explain" -> """
-                        You are an expert Kotlin developer and teacher.
-                        Explain the code clearly and thoroughly.
-                        Mention key Kotlin features used (null safety, extensions, coroutines, etc.).
-                        Be structured and educational.
-                    """.trimIndent()
-
-                    "Debug" -> """
-                        You are a senior Kotlin code reviewer.
-                        Find all bugs including: null pointer risks, type mismatches, logic errors, edge cases, concurrency issues.
-                        If no bugs exist, say only: No bugs found.
-                        Do not invent problems. Be precise. Use bullet points.
-                    """.trimIndent()
-
-                    "Optimize" -> """
-                        You are a senior Kotlin developer.
-                        Suggest concrete improvements with code examples.
-                        Consider: idiomatic Kotlin, performance, readability, scope functions, extension functions.
-                        If code is already optimal, say: Code looks good.
-                    """.trimIndent()
-
-                    "Complexity" -> """
-                        You are an algorithm analysis expert.
-                        Provide time and space complexity in Big-O notation.
-                        Analyze each loop, recursion, and data structure used.
-                        Format: Time: O(?), Space: O(?).
-                        Explain your reasoning step by step.
-                    """.trimIndent()
-
-                    else -> "You are an expert Kotlin code analyst."
-                }
-            )
-        } else {
-            LLMGenerationOptions(
-                temperature = 0.1f,
-                topP = 0.9f,
-                maxTokens = run {
-                    val codeLines = codeInput.lines().size
-                    val baseTokens = when (selectedMode) {
-                        "Explain" -> 250
-                        "Debug" -> 250
-                        "Optimize" -> 250
-                        "Complexity" ->150
-                        else -> 200
-                    }
-                    val scaled = baseTokens + (codeLines / 5) * 30
-                    scaled.coerceAtMost(600)
-                },
-                stopSequences = listOf(
-                    "<|im_end|>",
-                    "<|endoftext|>",
-                    "\n\n\n",
-                    "User:",
-                    "Human:"
-                ),
-                systemPrompt = when (selectedMode) {
-                    "Explain" -> """
-                        You are a Kotlin code explainer.
-                        Explain what the code does in 2-3 short sentences.
-                        Do not mention errors or improvements.
-                        Be direct and concise.
-                    """.trimIndent()
-
-                    "Debug" -> """
-                        You are a Kotlin debugger.
-                        List only real bugs found in the code.
-                        If no bugs exist, say only: No bugs found.
-                        Do not invent problems. Use bullet points.
-                    """.trimIndent()
-
-                    "Optimize" -> """
-                        You are a Kotlin code reviewer.
-                        Suggest maximum 3 improvements.
-                        If code is already good, say: Code looks good.
-                        Do not repeat the original code.
-                    """.trimIndent()
-
-                    "Complexity" -> """
-                        You are an algorithm analyst.
-                        State time and space complexity in Big-O notation.
-                        Format: Time: O(?), Space: O(?).
-                        Add one sentence explanation. Nothing else.
-                    """.trimIndent()
-
-                    else -> "You are a Kotlin code analyst."
-                }
-            )
-        }
-    }
-}
-
-fun looksLikeKotlin(code: String): Boolean {
-    val trimmed = code.trim()
-    if (trimmed.length < 5) return false
-
-    val kotlinSignals = listOf(
-        "fun ", "val ", "var ",
-        "data class ", "sealed class ", "sealed interface ",
-        "object ", "companion object",
-        "suspend fun", "override fun",
-        "when (", "when {",
-        "println(", "print(",
-        "listOf(", "mapOf(", "mutableListOf(",
-        "?.","!!",
-        "it.", "it ->",
-        ": Int", ": String", ": Boolean", ": Long", ": Double", ": Float", ": Unit", ": Any",
-        ".forEach", ".map(", ".filter(", ".let {", ".apply {", ".also {",
-        "package ", "import "
-    )
-
-    val antiSignals = listOf(
-        "#include",
-        "public static void main",
-        "System.out.println",
-        "def ",
-        "function ",
-        "const ",
-        "let ",
-        "console.log",
-        "printf(",
-        "cout <<",
-        "cin >>",
-        "<!DOCTYPE",
-        "<html",
-        "SELECT ", "FROM ", "INSERT INTO"
-    )
-
-    val antiCount = antiSignals.count { trimmed.contains(it, ignoreCase = true) }
-    if (antiCount >= 1) return false
-
-    val kotlinCount = kotlinSignals.count { trimmed.contains(it) }
-
-    return kotlinCount >= 2
 }

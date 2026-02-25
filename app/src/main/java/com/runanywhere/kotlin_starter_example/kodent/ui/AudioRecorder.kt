@@ -7,6 +7,7 @@ import java.io.ByteArrayOutputStream
 
 class AudioRecorder {
     private var audioRecord: AudioRecord? = null
+    @Volatile
     private var isRecording = false
     private val audioData = ByteArrayOutputStream()
 
@@ -17,6 +18,8 @@ class AudioRecorder {
     }
 
     fun startRecording(): Boolean {
+        if (isRecording) return false
+
         val bufferSize = AudioRecord.getMinBufferSize(SAMPLE_RATE, CHANNEL_CONFIG, AUDIO_FORMAT)
         if (bufferSize == AudioRecord.ERROR || bufferSize == AudioRecord.ERROR_BAD_VALUE) {
             return false
@@ -39,6 +42,7 @@ class AudioRecorder {
             audioRecord?.startRecording()
             isRecording = true
 
+            // CORRECT - Use Kotlin's thread syntax instead
             Thread {
                 val buffer = ByteArray(bufferSize)
                 while (isRecording) {
@@ -53,6 +57,12 @@ class AudioRecorder {
 
             true
         } catch (e: SecurityException) {
+            audioRecord?.release()
+            audioRecord = null
+            false
+        } catch (e: Exception) {
+            audioRecord?.release()
+            audioRecord = null
             false
         }
     }

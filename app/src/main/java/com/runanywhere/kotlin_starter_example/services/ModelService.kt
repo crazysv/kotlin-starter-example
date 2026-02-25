@@ -26,6 +26,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.runanywhere.sdk.public.extensions.LLM.LLMGenerationOptions
+import com.runanywhere.sdk.public.extensions.generateStream
 
 enum class ModelType {
     QUICK, // SmolLM2-360M
@@ -50,6 +52,15 @@ class ModelService : ViewModel() {
 
     // Track which model is being downloaded/loaded
     var modelBeingPrepared by mutableStateOf<ModelType?>(null)
+        private set
+
+    var isPreWarming by mutableStateOf(false)
+        private set
+
+    var isQuickDownloaded by mutableStateOf(false)
+        private set
+
+    var isDeepDownloaded by mutableStateOf(false)
         private set
 
     // STT state
@@ -77,6 +88,7 @@ class ModelService : ViewModel() {
 
     var errorMessage by mutableStateOf<String?>(null)
         private set
+
 
     companion object {
         // Quick Model
@@ -133,6 +145,7 @@ class ModelService : ViewModel() {
     init {
         viewModelScope.launch {
             refreshModelState()
+            checkDownloadedModels()
         }
     }
 
@@ -141,6 +154,11 @@ class ModelService : ViewModel() {
         isSTTLoaded = RunAnywhere.isSTTModelLoaded()
         isTTSLoaded = RunAnywhere.isTTSVoiceLoaded()
         isVoiceAgentReady = RunAnywhere.isVoiceAgentReady()
+    }
+
+    private suspend fun checkDownloadedModels() {
+        isQuickDownloaded = isModelDownloaded(QUICK_MODEL_ID)
+        isDeepDownloaded = isModelDownloaded(DEEP_MODEL_ID)
     }
 
     private suspend fun isModelDownloaded(modelId: String): Boolean {
@@ -158,6 +176,24 @@ class ModelService : ViewModel() {
 
     suspend fun isModelTypeDownloaded(type: ModelType): Boolean {
         return isModelDownloaded(getModelId(type))
+    }
+
+    private suspend fun prewarmModel() {
+        try {
+            isPreWarming = true
+            withContext(Dispatchers.IO) {
+                val warmupOptions = LLMGenerationOptions(
+                    temperature = 0.01f,
+                    maxTokens = 1,
+                    systemPrompt = "Reply with OK."
+                )
+                RunAnywhere.generateStream("Hi", warmupOptions)
+                    .collect { /* discard */ }
+            }
+            isPreWarming = false
+        } catch (e: Exception) {
+            isPreWarming = false
+        }
     }
 
     fun downloadAndLoadModel(type: ModelType) {
@@ -191,6 +227,12 @@ class ModelService : ViewModel() {
                         }
 
                     isLLMDownloading = false
+
+                    // Track download state
+                    when (type) {
+                        ModelType.QUICK -> isQuickDownloaded = true
+                        ModelType.DEEP -> isDeepDownloaded = true
+                    }
                 }
 
                 // Step 2: Unload current model if one is loaded (OFF MAIN THREAD)
@@ -212,6 +254,10 @@ class ModelService : ViewModel() {
                 }
                 isLLMLoaded = true
                 activeModel = type
+                isLLMLoading = false
+
+                // Step 4: Pre-warm the model
+                prewarmModel()
 
                 refreshModelState()
 
