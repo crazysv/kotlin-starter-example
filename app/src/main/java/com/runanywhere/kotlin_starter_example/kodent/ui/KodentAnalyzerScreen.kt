@@ -50,6 +50,11 @@ import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import com.runanywhere.kotlin_starter_example.kodent.engine.CodeHealthResult
+import com.runanywhere.kotlin_starter_example.kodent.engine.SecurityScanResult
+import com.runanywhere.kotlin_starter_example.kodent.engine.SecurityReportExporter
+import androidx.compose.material.icons.rounded.Description
+import com.runanywhere.kotlin_starter_example.kodent.engine.HealthReportExporter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -103,8 +108,14 @@ fun KodentAnalyzerScreen(
                         Text("Kodent", fontWeight = FontWeight.Bold)
                         Text(
                             text = when {
-                                kodentViewModel.isAnalyzing ->
-                                    "⏳ Analyzing... ${kodentViewModel.tokenCount} tokens"
+                                kodentViewModel.isAnalyzing -> {
+                                    val tps = kodentViewModel.tokensPerSecond
+                                    if (tps > 0) {
+                                        "⏳ ${kodentViewModel.tokenCount} tokens • %.1f t/s".format(tps)
+                                    } else {
+                                        "⏳ Starting analysis..."
+                                    }
+                                }
                                 modelService.activeModel == ModelType.QUICK ->
                                     "🚀 Quick Mode"
                                 modelService.activeModel == ModelType.DEEP ->
@@ -282,7 +293,9 @@ private fun AnalyzerContent(
                 "Explain" to "💡",
                 "Debug" to "🐛",
                 "Optimize" to "⚡",
-                "Complexity" to "📊"
+                "Complexity" to "📊",
+                "Health" to "🏥",
+                "Security" to "🔒"
             ).forEach { (mode, emoji) ->
                 FilterChip(
                     selected = kodentViewModel.selectedMode == mode,
@@ -376,7 +389,10 @@ private fun AnalyzerContent(
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Analyzing...")
                 } else {
-                    Text("🔍 Analyze")
+                    Text(
+                        if (kodentViewModel.selectedMode == "Security") "🔒 Scan"
+                        else "🔍 Analyze"
+                    )
                 }
             }
 
@@ -482,6 +498,29 @@ private fun AnalyzerContent(
 
                 Spacer(modifier = Modifier.weight(1f))
 
+                // Export button (Security or Health mode)
+                if ((kodentViewModel.selectedMode == "Security" && kodentViewModel.securityResult != null) ||
+                    (kodentViewModel.selectedMode == "Health" && kodentViewModel.healthResult != null)) {
+                    IconButton(onClick = {
+                        val report = when (kodentViewModel.selectedMode) {
+                            "Security" -> SecurityReportExporter.exportAsText(
+                                kodentViewModel.securityResult!!,
+                                kodentViewModel.codeInput,
+                                kodentViewModel.selectedLanguage
+                            )
+                            "Health" -> HealthReportExporter.exportAsText(
+                                kodentViewModel.healthResult!!,
+                                kodentViewModel.codeInput,
+                                kodentViewModel.selectedLanguage
+                            )
+                            else -> ""
+                        }
+                        clipboardManager.setText(AnnotatedString(report))
+                    }) {
+                        Icon(Icons.Rounded.Description, "Export Report", tint = AccentViolet)
+                    }
+                }
+
                 // Copy button
                 IconButton(onClick = {
                     clipboardManager.setText(
@@ -509,25 +548,106 @@ private fun AnalyzerContent(
 
             Spacer(modifier = Modifier.height(4.dp))
 
-            // Result content in card
-            Card(
-                colors = CardDefaults.cardColors(
-                    containerColor = badgeColorFor(kodentViewModel.selectedMode)
-                        .copy(alpha = 0.05f)
-                ),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                SelectionContainer {
-                    Text(
-                        text = kodentViewModel.analysisResult,
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontFamily = FontFamily.Monospace,
-                            lineHeight = 20.sp
-                        ),
+            // Show Security Scanner, Health Dashboard, or plain text result
+            val showSecurity = kodentViewModel.selectedMode == "Security" &&
+                    kodentViewModel.securityResult != null &&
+                    !kodentViewModel.isAnalyzing
+
+            val showDashboard = kodentViewModel.selectedMode == "Health" &&
+                    kodentViewModel.healthResult != null &&
+                    !kodentViewModel.isAnalyzing
+
+            if (showSecurity) {
+                // Security Scanner View
+                SecurityScannerView(
+                    scanResult = kodentViewModel.securityResult!!,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            } else if (showDashboard) {
+                // Health Dashboard View
+                HealthDashboardView(
+                    healthResult = kodentViewModel.healthResult!!,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            } else if (kodentViewModel.selectedMode == "Security" && kodentViewModel.isAnalyzing) {
+                // Security scanning progress
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = AccentPink.copy(alpha = 0.05f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
                         modifier = Modifier
-                            .padding(12.dp)
-                            .verticalScroll(scrollState)
-                    )
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        CircularProgressIndicator(
+                            color = AccentPink,
+                            modifier = Modifier.size(40.dp)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            "🔒 Scanning for vulnerabilities...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = AccentPink
+                        )
+                    }
+                }
+            } else if (kodentViewModel.selectedMode == "Health" && kodentViewModel.isAnalyzing) {
+                // Health mode progress
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = AccentViolet.copy(alpha = 0.05f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(24.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        CircularProgressIndicator(
+                            color = AccentViolet,
+                            modifier = Modifier.size(40.dp)
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            "🏥 Analyzing code health...",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = AccentViolet
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            kodentViewModel.tokenCount.toString() + " tokens generated",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = TextMuted
+                        )
+                    }
+                }
+            } else {
+                // Regular text result for other modes
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = badgeColorFor(kodentViewModel.selectedMode)
+                            .copy(alpha = 0.05f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    SelectionContainer {
+                        Text(
+                            text = kodentViewModel.analysisResult,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontFamily = FontFamily.Monospace,
+                                lineHeight = 20.sp
+                            ),
+                            modifier = Modifier
+                                .padding(12.dp)
+                                .verticalScroll(scrollState)
+                        )
+                    }
                 }
             }
         }
@@ -630,6 +750,8 @@ private fun badgeColorFor(mode: String): Color {
         "Debug" -> AccentPink
         "Optimize" -> AccentGreen
         "Complexity" -> AccentOrange
+        "Health" -> AccentViolet
+        "Security" -> AccentPink
         else -> AccentCyan
     }
 }
@@ -640,6 +762,8 @@ private fun modeEmoji(mode: String): String {
         "Debug" -> "🐛"
         "Optimize" -> "⚡"
         "Complexity" -> "📊"
+        "Health" -> "🏥"
+        "Security" -> "🔒"
         else -> "🔍"
     }
 }

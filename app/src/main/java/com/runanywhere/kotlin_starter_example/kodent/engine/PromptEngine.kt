@@ -8,7 +8,7 @@ object PromptEngine {
         language: String,
         modelType: String?
     ): String {
-        val trimmedCode = truncateCode(code, maxChars = 800)
+        val trimmedCode = truncateCode(code, maxChars = 500)
         val lang = language.lowercase()
         val isDeep = modelType == "deep"
 
@@ -61,6 +61,16 @@ object PromptEngine {
                         code + "\n" +
                         "```\n" +
                         "Time: O("
+            }
+
+            "Health" -> {
+                "List all problems in this " + lang + " code. " +
+                        "Check for: bugs, performance issues, security risks, readability, complexity. " +
+                        "One problem per line.\n\n" +
+                        "```" + lang + "\n" +
+                        code + "\n" +
+                        "```\n\n" +
+                        "Problems found:"
             }
 
             else -> {
@@ -121,6 +131,16 @@ object PromptEngine {
                         "```\n" +
                         "Complexity Analysis:\n" +
                         "Time: O("
+            }
+
+            "Health" -> {
+                "List all problems in this " + lang + " code. " +
+                        "Check for: bugs, null safety, performance, security vulnerabilities, " +
+                        "readability, naming, complexity. One problem per line with category.\n\n" +
+                        "```" + lang + "\n" +
+                        code + "\n" +
+                        "```\n\n" +
+                        "Problems found:"
             }
 
             else -> {

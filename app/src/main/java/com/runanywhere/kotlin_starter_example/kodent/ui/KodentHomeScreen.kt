@@ -77,7 +77,7 @@ fun KodentHomeScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             Text(
-                text = "AI-Powered Kotlin Code Analyzer",
+                text = "AI-Powered Code Analyzer",
                 style = MaterialTheme.typography.titleMedium,
                 color = AccentCyan
             )
@@ -212,7 +212,7 @@ fun KodentHomeScreen(
             FeatureCard(
                 emoji = "💡",
                 title = "Explain",
-                description = "Understand what any Kotlin code does",
+                description = "Understand what code does",
                 color = AccentCyan
             )
 

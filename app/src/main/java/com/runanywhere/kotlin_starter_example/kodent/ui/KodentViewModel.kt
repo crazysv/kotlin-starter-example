@@ -23,6 +23,14 @@ import com.runanywhere.kotlin_starter_example.kodent.engine.PromptEngine
 import com.runanywhere.kotlin_starter_example.kodent.engine.StreamRepetitionDetector
 import kotlinx.coroutines.CancellationException
 import com.runanywhere.kotlin_starter_example.kodent.engine.CodeValidator
+import com.runanywhere.kotlin_starter_example.kodent.engine.CodeHealthParser
+import com.runanywhere.kotlin_starter_example.kodent.engine.CodeHealthResult
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.catch
+import com.runanywhere.kotlin_starter_example.kodent.engine.SecurityScanner
+import com.runanywhere.kotlin_starter_example.kodent.engine.SecurityScanResult
+import com.runanywhere.kotlin_starter_example.kodent.engine.CodeHealthAnalyzer
 
 class KodentViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -58,6 +66,12 @@ class KodentViewModel(application: Application) : AndroidViewModel(application) 
     var tokensPerSecond by mutableStateOf(0f)
         private set
 
+    var healthResult by mutableStateOf<CodeHealthResult?>(null)
+        private set
+
+    var securityResult by mutableStateOf<SecurityScanResult?>(null)
+        private set
+
     fun updateLanguage(lang: String) {
         selectedLanguage = lang
     }
@@ -74,6 +88,20 @@ class KodentViewModel(application: Application) : AndroidViewModel(application) 
 
     init {
         loadHistory()
+    }
+
+    private fun codeMatchesLanguage(code: String, language: String): Boolean {
+        val text = code.trim()
+
+        return when (language) {
+            "Kotlin" -> text.contains("fun ") || text.contains("val ") || text.contains("var ")
+            "Java" -> text.contains("public class") || text.contains("static void")
+            "Python" -> text.contains("def ") || text.contains("import ")
+            "JS" -> text.contains("function ") || text.contains("const ") || text.contains("=>")
+            "C++" -> text.contains("#include") || text.contains("std::")
+            "Go" -> text.contains("package ") || text.contains("func ")
+            else -> true
+        }
     }
 
     private fun loadHistory() {
@@ -133,6 +161,8 @@ class KodentViewModel(application: Application) : AndroidViewModel(application) 
         tokenCount = 0
         tokensPerSecond = 0f
         analysisTimeMs = 0L
+        healthResult = null
+        securityResult = null
     }
 
     fun clearError() {
@@ -146,6 +176,80 @@ class KodentViewModel(application: Application) : AndroidViewModel(application) 
 
     fun cancelAnalysis() {
         analysisJob?.cancel()
+        analysisJob = null
+        isAnalyzing = false
+        analysisResult = ""
+        tokenCount = 0
+        tokensPerSecond = 0f
+        healthResult = null
+        repetitionDetector.reset()
+        securityResult = null
+    }
+
+    private fun runSecurityScan() {
+        viewModelScope.launch {
+            isAnalyzing = true
+            analysisResult = ""
+            errorMessage = null
+            tokenCount = 0
+            tokensPerSecond = 0f
+            analysisTimeMs = 0L
+            securityResult = null
+
+            val startTime = System.currentTimeMillis()
+
+            val result = withContext(Dispatchers.Default) {
+                SecurityScanner.scan(codeInput, selectedLanguage)
+            }
+
+            securityResult = result
+            analysisResult = result.summary
+            analysisTimeMs = System.currentTimeMillis() - startTime
+            tokenCount = result.vulnerabilities.size
+            isAnalyzing = false
+
+            // Save to history
+            history = (history + AnalysisRecord(
+                code = codeInput,
+                mode = "Security",
+                language = selectedLanguage,
+                result = "Security Grade: ${result.grade} (${result.score}/100) • ${result.vulnerabilities.size} issues"
+            )).takeLast(20)
+            saveHistory()
+        }
+    }
+
+    private fun runHealthAnalysis() {
+        viewModelScope.launch {
+            isAnalyzing = true
+            analysisResult = ""
+            errorMessage = null
+            tokenCount = 0
+            tokensPerSecond = 0f
+            analysisTimeMs = 0L
+            healthResult = null
+
+            val startTime = System.currentTimeMillis()
+
+            val result = withContext(Dispatchers.Default) {
+                CodeHealthAnalyzer.analyze(codeInput, selectedLanguage)
+            }
+
+            healthResult = result
+            analysisResult = result.summary
+            analysisTimeMs = System.currentTimeMillis() - startTime
+            tokenCount = result.issues.size
+            isAnalyzing = false
+
+            // Save to history
+            history = (history + AnalysisRecord(
+                code = codeInput,
+                mode = "Health",
+                language = selectedLanguage,
+                result = "Health Score: ${result.overallScore}/100 • ${result.issues.size} issues"
+            )).takeLast(20)
+            saveHistory()
+        }
     }
 
     fun startListening() {
@@ -253,131 +357,180 @@ class KodentViewModel(application: Application) : AndroidViewModel(application) 
             return
         }
 
+        if (!codeMatchesLanguage(codeInput, selectedLanguage)) {
+            analysisResult = "⚠️ The pasted code may not match selected language ($selectedLanguage)."
+            return
+        }
+
+        // Security mode uses rule-based scanner — no LLM needed
+        if (selectedMode == "Security") {
+            runSecurityScan()
+            return
+        }
+
+        // Health mode uses rule-based analyzer — no LLM needed
+        if (selectedMode == "Health") {
+            runHealthAnalysis()
+            return
+        }
+
         val isDeep = activeModel == ModelType.DEEP
+        val useDeepForThis = if (selectedMode == "Health") false else isDeep
 
         analysisJob?.cancel()
-        analysisJob = viewModelScope.launch {
-            try {
-                isAnalyzing = true
-                analysisResult = ""
-                errorMessage = null
-                tokenCount = 0
-                tokensPerSecond = 0f
-                analysisTimeMs = 0L
-                repetitionDetector.reset()
+        analysisJob = null
 
-                // ✅ Use PromptEngine (fixes ${'$'} bug and code fence bug)
+        analysisJob = viewModelScope.launch(Dispatchers.Default) {
+            try {
+                withContext(Dispatchers.Main) {
+                    isAnalyzing = true
+                    analysisResult = ""
+                    errorMessage = null
+                    tokenCount = 0
+                    tokensPerSecond = 0f
+                    analysisTimeMs = 0L
+                    healthResult = null
+                }
+                repetitionDetector.reset()
+                delay(150)
+
                 val prompt = PromptEngine.build(
                     code = codeInput,
                     mode = selectedMode,
                     language = selectedLanguage,
-                    modelType = if (isDeep) "deep" else "quick"
+                    modelType = if (useDeepForThis) "deep" else "quick"
                 )
 
-                // ✅ Use GenerationConfig (per-mode parameters)
                 val genConfig = GenerationConfig.forMode(selectedMode)
 
                 val options = LLMGenerationOptions(
-                    temperature = if (isDeep) genConfig.temperature else genConfig.temperature * 0.8f,
+                    temperature = if (selectedMode == "Health") 0.01f
+                    else if (useDeepForThis) genConfig.temperature
+                    else genConfig.temperature * 0.8f,
                     topP = genConfig.topP,
-                    maxTokens = if (isDeep) {
-                        (genConfig.maxTokens * 1.5f).toInt().coerceAtMost(500)
-                    } else {
-                        genConfig.maxTokens
+                    maxTokens = run {
+                        val codeLength = codeInput.trim().length
+                        val baseTokens = genConfig.maxTokens
+                        val scaled = when {
+                            codeLength > 500 -> baseTokens + 80
+                            codeLength > 300 -> baseTokens + 40
+                            else -> baseTokens
+                        }
+                        if (useDeepForThis) scaled.coerceAtMost(350)
+                        else scaled.coerceAtMost(250)
                     },
                     stopSequences = genConfig.stopSequences,
-                    systemPrompt = buildSystemPrompt(isDeep)
+                    systemPrompt = buildSystemPrompt(useDeepForThis)
                 )
 
                 val buffer = StringBuilder()
                 var localTokenCount = 0
                 val startTime = System.currentTimeMillis()
-                val maxTimeMs = if (isDeep) 90_000L else 45_000L
+                val maxTimeMs = if (useDeepForThis) 180_000L else 90_000L
 
-                RunAnywhere.generateStream(prompt, options)
-                    .collect { token ->
-                        val elapsed = System.currentTimeMillis() - startTime
-
-                        // ✅ Timeout protection
-                        if (elapsed > maxTimeMs) {
-                            buffer.append("\n\n⏱️ Time limit reached.")
-                            analysisResult = buffer.toString()
-                            analysisJob?.cancel()
-                            return@collect
+                try {
+                    RunAnywhere.generateStream(prompt, options)
+                        .flowOn(Dispatchers.IO)
+                        .catch { e ->
+                            if (e !is CancellationException) {
+                                errorMessage = "Generation error: ${e.message}"
+                            }
                         }
+                        .collect { token ->
+                            val elapsed = System.currentTimeMillis() - startTime
 
-                        // ✅ Repetition detection (NEW)
-                        if (repetitionDetector.shouldStop(token)) {
-                            analysisResult = buffer.toString()
-                            analysisJob?.cancel()
-                            return@collect
+                            if (elapsed > maxTimeMs) {
+                                buffer.append("\n\n⏱️ Time limit reached.")
+                                analysisResult = buffer.toString()
+                                analysisJob?.cancel()
+                                return@collect
+                            }
+
+                            if (selectedMode != "Health" && repetitionDetector.shouldStop(token)) {
+                                analysisResult = buffer.toString()
+                                analysisJob?.cancel()
+                                return@collect
+                            }
+
+                            buffer.append(token)
+                            localTokenCount++
+
+                            if (localTokenCount % 3 == 0 || token.contains("\n")) {
+                                withContext(Dispatchers.Main) {
+                                    analysisResult = buffer.toString()
+                                    tokenCount = localTokenCount
+
+                                    val elapsedSec = elapsed / 1000.0f
+                                    if (elapsedSec > 1f) {
+                                        tokensPerSecond = localTokenCount / elapsedSec
+                                    }
+                                }
+                            }
                         }
-
-                        buffer.append(token)
-                        localTokenCount++
-
-                        // ✅ Update EVERY token (was every 3 — choppy)
-                        analysisResult = buffer.toString()
-                        tokenCount = localTokenCount
-
-                        // ✅ Tokens/sec tracking (NEW)
-                        val elapsedSec = elapsed / 1000.0f
-                        if (elapsedSec > 0.5f) {
-                            tokensPerSecond = localTokenCount / elapsedSec
-                        }
-                    }
-
-                // ✅ Post-process output (NEW — cleans artifacts)
-                analysisResult = OutputProcessor.process(buffer.toString(), selectedMode)
-                tokenCount = localTokenCount
-                analysisTimeMs = System.currentTimeMillis() - startTime
-
-                if (analysisResult.isBlank()) {
-                    analysisResult = when (selectedMode) {
-                        "Debug" -> "✅ No bugs found."
-                        "Optimize" -> "✅ Code looks good."
-                        "Complexity" -> "⚠️ Unable to determine complexity."
-                        else -> "⚠️ No output. Try shorter code."
-                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    errorMessage = "Stream error: ${e.message}"
                 }
 
-                // Save to history (with language)
-                history = (history + AnalysisRecord(
-                    code = codeInput,
-                    mode = selectedMode,
-                    language = selectedLanguage,
-                    result = analysisResult
-                )).takeLast(20)
+                withContext(Dispatchers.Main) {
+                    analysisResult = OutputProcessor.process(buffer.toString(), selectedMode)
+                    tokenCount = localTokenCount
+                    analysisTimeMs = System.currentTimeMillis() - startTime
+
+                    if (selectedMode == "Health") {
+                        android.util.Log.d("KODENT_HEALTH", "Raw output: $analysisResult")
+                        healthResult = CodeHealthParser.parseWithCode(analysisResult, codeInput)
+                        android.util.Log.d("KODENT_HEALTH", "Scores: bug=${healthResult?.bugRisk} perf=${healthResult?.performance} sec=${healthResult?.security} read=${healthResult?.readability} comp=${healthResult?.complexity}")
+                    }
+
+                    if (analysisResult.isBlank()) {
+                        analysisResult = when (selectedMode) {
+                            "Debug" -> "✅ No bugs found."
+                            "Optimize" -> "✅ Code looks good."
+                            "Complexity" -> "⚠️ Unable to determine complexity."
+                            else -> "⚠️ No output. Try shorter code."
+                        }
+                    }
+
+                    history = (history + AnalysisRecord(
+                        code = codeInput,
+                        mode = selectedMode,
+                        language = selectedLanguage,
+                        result = analysisResult
+                    )).takeLast(20)
+
+                    isAnalyzing = false
+                }
                 saveHistory()
 
-            } catch (e: Exception) {
-                if (e is CancellationException) {
+            } catch (e: CancellationException) {
+                withContext(Dispatchers.Main) {
                     if (analysisResult.isNotBlank()) {
                         analysisResult = OutputProcessor.process(analysisResult, selectedMode)
                         if (!analysisResult.contains("⏱️")) {
                             analysisResult += "\n\n⚠️ Generation stopped."
                         }
                     }
-                    throw e
+                    isAnalyzing = false
                 }
-                analysisResult = ""
-                errorMessage = when {
-                    e.message?.contains("model", true) == true -> "Model error. Try reloading."
-                    e.message?.contains(
-                        "memory",
-                        true
-                    ) == true -> "Not enough memory. Try shorter code."
-
-                    else -> "Analysis failed: ${e.message ?: "Unknown error"}"
+                throw e
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    analysisResult = ""
+                    errorMessage = when {
+                        e.message?.contains("model", true) == true -> "Model error. Try reloading."
+                        e.message?.contains("memory", true) == true -> "Not enough memory. Try shorter code."
+                        else -> "Analysis failed: ${e.message ?: "Unknown error"}"
+                    }
+                    isAnalyzing = false
                 }
-            } finally {
-                isAnalyzing = false
             }
         }
     }
 
     private fun buildSystemPrompt(isDeep: Boolean): String {
-        val lang = selectedLanguage  // ✅ No more ${'$'} bug
+        val lang = selectedLanguage
 
         return if (isDeep) {
             when (selectedMode) {
@@ -385,6 +538,7 @@ class KodentViewModel(application: Application) : AndroidViewModel(application) 
                 "Debug" -> "You are a senior $lang reviewer. Find real bugs only. If none, say 'No bugs found.' Don't invent problems."
                 "Optimize" -> "You are a senior $lang developer. Suggest concrete improvements. Show improved code if applicable."
                 "Complexity" -> "You are an algorithm expert. Provide Big-O for time and space. Analyze loops and data structures."
+                "Health" -> "List all problems in this code. Check for bugs, null safety, performance issues, security vulnerabilities, readability problems, complexity. One per line with specifics."
                 else -> "You are an expert $lang code analyst."
             }
         } else {
@@ -393,6 +547,7 @@ class KodentViewModel(application: Application) : AndroidViewModel(application) 
                 "Debug" -> "You are a $lang debugger. List only real bugs. If none, say 'No bugs found.'"
                 "Optimize" -> "You are a $lang reviewer. Suggest max 3 improvements."
                 "Complexity" -> "State time and space complexity in Big-O. One sentence explanation."
+                "Health" -> "List all problems in this code. Check bugs, performance, security, readability. One per line. Be specific."
                 else -> "You are a $lang code analyst."
             }
         }

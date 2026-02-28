@@ -30,6 +30,12 @@ object GenerationConfig {
             temperature = 0.01f, topP = 0.8f,
             maxTokens = 60, repeatPenalty = 1.2f
         )
+        "Health" -> GenConfig(
+            temperature = 0.01f,
+            topP = 0.9f,
+            maxTokens = 150,
+            repeatPenalty = 1.3f
+        )
         else -> GenConfig(
             temperature = 0.1f, topP = 0.9f,
             maxTokens = 180, repeatPenalty = 1.3f
