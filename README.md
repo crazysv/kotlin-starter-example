@@ -1,6 +1,6 @@
-\# 🚀 Kodent
+# 🚀 Kodent
 
-\## 🔒 Fully Offline AI‑Powered Code Analysis Platform
+## 🔒 Fully Offline AI‑Powered Code Analysis Platform
 
 
 
@@ -12,7 +12,7 @@ Kodent is a \*\*privacy‑first, fully offline AI code analysis assistant\*\* bu
 
 
 
-\## 🧠 The Problem
+## 🧠 The Problem
 
 
 
@@ -24,13 +24,13 @@ But that creates serious issues:
 
 
 
-\- 🔐 Sensitive company code must be uploaded to external servers  
+- 🔐 Sensitive company code must be uploaded to external servers  
 
-\- 🌐 Internet dependency limits accessibility  
+- 🌐 Internet dependency limits accessibility  
 
-\- 💰 Enterprise security tools are expensive  
+- 💰 Enterprise security tools are expensive  
 
-\- 📦 Students and independent developers lack structured security tools  
+- 📦 Students and independent developers lack structured security tools  
 
 
 
@@ -42,7 +42,7 @@ There is a gap between powerful enterprise tooling and accessible development to
 
 
 
-\## 💡 The Solution
+## 💡 The Solution
 
 
 
@@ -50,17 +50,17 @@ Kodent combines:
 
 
 
-\- 🔒 \*\*Enterprise‑grade Security Scanner\*\*
+- 🔒 \*\*Enterprise‑grade Security Scanner\*\*
 
-\- 🏥 \*\*Code Health Dashboard\*\*
+- 🏥 \*\*Code Health Dashboard\*\*
 
-\- 🤖 \*\*On‑device AI Assistant\*\*
+- 🤖 \*\*On‑device AI Assistant\*\*
 
-\- 📊 \*\*Structured Code Metrics\*\*
+- 📊 \*\*Structured Code Metrics\*\*
 
-\- 📜 \*\*Compliance Checks\*\*
+- 📜 \*\*Compliance Checks\*\*
 
-\- ✅ \*\*Industry Standard Mapping\*\*
+- ✅ \*\*Industry Standard Mapping\*\*
 
 
 
@@ -72,7 +72,7 @@ All running fully offline.
 
 
 
-\# 🔒 Security Scanner
+# 🔒 Security Scanner
 
 
 
@@ -80,41 +80,41 @@ Kodent detects:
 
 
 
-\### 🔴 Critical
+### 🔴 Critical
 
-\- Hardcoded secrets
+- Hardcoded secrets
 
-\- SQL injection
+- SQL injection
 
-\- Command injection
+- Command injection
 
-\- Path traversal
+- Path traversal
 
-\- Insecure deserialization
-
-
-
-\### 🟠 High
-
-\- SSL bypass
-
-\- Cleartext HTTP
-
-\- Sensitive logging
-
-\- Android component misconfigurations
+- Insecure deserialization
 
 
 
-\### 🟡 Medium / 🔵 Low
+### 🟠 High
 
-\- Weak cryptography
+- SSL bypass
 
-\- Unsafe random usage
+- Cleartext HTTP
 
-\- Code misconfiguration
+- Sensitive logging
 
-\- Insecure storage patterns
+- Android component misconfigurations
+
+
+
+### 🟡 Medium / 🔵 Low
+
+- Weak cryptography
+
+- Unsafe random usage
+
+- Code misconfiguration
+
+- Insecure storage patterns
 
 
 
@@ -122,7 +122,7 @@ Kodent detects:
 
 
 
-\## ✅ Industry Standard Mapping
+## ✅ Industry Standard Mapping
 
 
 
@@ -130,13 +130,13 @@ Each vulnerability is mapped to:
 
 
 
-\- \*\*OWASP Top 10\*\*
+- \*\*OWASP Top 10\*\*
 
-\- \*\*OWASP Mobile Top 10\*\*
+- \*\*OWASP Mobile Top 10\*\*
 
-\- \*\*CWE identifiers\*\*
+- \*\*CWE identifiers\*\*
 
-\- \*\*CVSS severity score\*\*
+- \*\*CVSS severity score\*\*
 
 
 
@@ -144,7 +144,7 @@ Each vulnerability is mapped to:
 
 
 
-\## 📜 Compliance Checks
+## 📜 Compliance Checks
 
 
 
@@ -152,15 +152,15 @@ Kodent checks for potential violations of:
 
 
 
-\- GDPR
+- GDPR
 
-\- HIPAA
+- HIPAA
 
-\- PCI DSS
+- PCI DSS
 
-\- SOC 2
+- SOC 2
 
-\- COPPA
+- COPPA
 
 
 
@@ -168,7 +168,7 @@ Kodent checks for potential violations of:
 
 
 
-\# 🏥 Code Health Dashboard
+# 🏥 Code Health Dashboard
 
 
 
@@ -176,15 +176,15 @@ Kodent analyzes five quality dimensions:
 
 
 
-\- 🐛 \*\*Bug Risk\*\*
+- 🐛 \*\*Bug Risk\*\*
 
-\- ⚡ \*\*Performance\*\*
+- ⚡ \*\*Performance\*\*
 
-\- 🔒 \*\*Security\*\*
+- 🔒 \*\*Security\*\*
 
-\- 📖 \*\*Readability\*\*
+- 📖 \*\*Readability\*\*
 
-\- 🧩 \*\*Complexity\*\*
+- 🧩 \*\*Complexity\*\*
 
 
 
@@ -192,15 +192,15 @@ It provides:
 
 
 
-\- Structured issue breakdown
+- Structured issue breakdown
 
-\- Expandable fix suggestions
+- Expandable fix suggestions
 
-\- Code metrics
+- Code metrics
 
-\- Best practice detection
+- Best practice detection
 
-\- Deterministic scoring (0–100)
+- Deterministic scoring (0–100)
 
 
 
@@ -212,7 +212,7 @@ All results are generated in real time.
 
 
 
-\# 🤖 AI Assistant (On‑Device)
+# 🤖 AI Assistant (On‑Device)
 
 
 
@@ -220,13 +220,13 @@ Kodent includes an on‑device language model capable of:
 
 
 
-\- 💡 Explaining code
+- 💡 Explaining code
 
-\- 🐛 Finding bugs
+- 🐛 Finding bugs
 
-\- ⚡ Suggesting optimizations
+- ⚡ Suggesting optimizations
 
-\- 📊 Estimating time \& space complexity
+- 📊 Estimating time \& space complexity
 
 
 
@@ -238,7 +238,7 @@ Streaming responses run fully offline using Llama.cpp.
 
 
 
-\# 📊 Code Metrics
+# 📊 Code Metrics
 
 
 
@@ -246,19 +246,19 @@ Kodent calculates:
 
 
 
-\- Lines of code
+- Lines of code
 
-\- Function count
+- Function count
 
-\- Nesting depth
+- Nesting depth
 
-\- Cyclomatic complexity
+- Cyclomatic complexity
 
-\- Comment ratio
+- Comment ratio
 
-\- val/var ratio
+- val/var ratio
 
-\- TODO detection
+- TODO detection
 
 
 
@@ -266,7 +266,7 @@ Kodent calculates:
 
 
 
-\# 🔐 Why Kodent?
+# 🔐 Why Kodent?
 
 
 
@@ -290,7 +290,7 @@ Kodent calculates:
 
 
 
-\# 🏗 Architecture
+# 🏗 Architecture
 
 
 
@@ -298,13 +298,13 @@ Kodent uses a hybrid architecture:
 
 
 
-\- 🔎 Rule‑based static analysis engine (deterministic)
+- 🔎 Rule‑based static analysis engine (deterministic)
 
-\- 🤖 On‑device LLM engine (contextual explanation)
+- 🤖 On‑device LLM engine (contextual explanation)
 
-\- 📱 Jetpack Compose UI
+- 📱 Jetpack Compose UI
 
-\- 🧠 Llama.cpp backend via RunAnywhere SDK
+- 🧠 Llama.cpp backend via RunAnywhere SDK
 
 
 
@@ -312,7 +312,7 @@ Kodent uses a hybrid architecture:
 
 
 
-\# 🔮 Future Vision
+# 🔮 Future Vision
 
 
 
@@ -320,15 +320,15 @@ Planned expansions:
 
 
 
-\- Project‑level multi‑file analysis  
+- Project‑level multi‑file analysis  
 
-\- Code dependency visualization  
+- Code dependency visualization  
 
-\- Refactoring suggestions  
+- Refactoring suggestions  
 
-\- CI‑compatible structured reports  
+- CI‑compatible structured reports  
 
-\- Cross‑platform interface (CLI/Desktop)  
+- Cross‑platform interface (CLI/Desktop)  
 
 
 
@@ -340,21 +340,21 @@ Kodent aims to become a \*\*portable, privacy‑first static analysis engine\*\*
 
 
 
-\# 🛠 Tech Stack
+# 🛠 Tech Stack
 
 
 
-\- Kotlin  
+- Kotlin  
 
-\- Jetpack Compose  
+- Jetpack Compose  
 
-\- Llama.cpp  
+- Llama.cpp  
 
-\- RunAnywhere SDK  
+- RunAnywhere SDK  
 
-\- Rule‑based static analysis engine  
+- Rule‑based static analysis engine  
 
-\- No external APIs  
+- No external APIs  
 
 
 
@@ -362,7 +362,7 @@ Kodent aims to become a \*\*portable, privacy‑first static analysis engine\*\*
 
 
 
-\## 🏆 Built For Hackathon
+## 🏆 Built For Hackathon
 
 
 
@@ -370,15 +370,15 @@ Kodent demonstrates:
 
 
 
-\- Offline AI inference  
+- Offline AI inference  
 
-\- Enterprise security analysis  
+- Enterprise security analysis  
 
-\- Compliance‑aware scanning  
+- Compliance‑aware scanning  
 
-\- Hybrid AI + static architecture  
+- Hybrid AI + static architecture  
 
-\- Structured developer tooling on mobile  
+- Structured developer tooling on mobile  
 
 
 
